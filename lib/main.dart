@@ -21,21 +21,22 @@ class MyApp extends StatelessWidget {
       title: 'Zelo',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        fontFamily: 'Geist',
       ),
-      home: const TabLayout(),
+      home: const MainScreen(),
     );
   }
 }
 
-class TabLayout extends StatefulWidget {
-  const TabLayout({super.key});
+class MainScreen extends StatefulWidget {
+  const MainScreen({super.key});
 
   @override
-  State<TabLayout> createState() => _TabLayoutState();
+  State<MainScreen> createState() => _MainScreenState();
 }
 
-class _TabLayoutState extends State<TabLayout> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _MainScreenState extends State<MainScreen>
+    with SingleTickerProviderStateMixin {
   final _audioRecorder = AudioRecorder();
   final _deepseekService = DeepseekService();
   bool _isRecording = false;
@@ -44,18 +45,35 @@ class _TabLayoutState extends State<TabLayout> with SingleTickerProviderStateMix
   String _transcribedText = '';
   bool _isTranscribing = false;
   bool _isAnalyzing = false;
-  final List<String> _todos = [];
-  final List<String> _ideas = [];
+  final List<TodoItem> _todos = [];
+  final List<IdeaItem> _ideas = [];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    // Initialize with sample data that matches the image
+    _todos.addAll([
+      TodoItem(task: 'official launch', dueDate: '1 September'),
+      TodoItem(task: 'start user testing', dueDate: '5 August'),
+      TodoItem(task: 'secure initial funding', dueDate: '15 July'),
+      TodoItem(task: 'launch the MVP', dueDate: '20 June'),
+      TodoItem(task: 'find a co-founder', dueDate: '11 May', completed: true),
+      TodoItem(
+          task: 'partner with a visionary co-founder',
+          dueDate: '1 May',
+          completed: true),
+    ]);
+
+    _ideas.addAll([
+      IdeaItem(idea: 'official launch', date: '1 September'),
+      IdeaItem(idea: 'beta testing', date: '15 August'),
+      IdeaItem(idea: 'design review', date: '5 June'),
+      IdeaItem(idea: 'prototype completion', date: '10 May'),
+    ]);
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
     _audioRecorder.dispose();
     super.dispose();
   }
@@ -63,7 +81,7 @@ class _TabLayoutState extends State<TabLayout> with SingleTickerProviderStateMix
   Future<bool> _checkPermissions() async {
     final micStatus = await Permission.microphone.request();
     final storageStatus = await Permission.storage.request();
-    
+
     if (micStatus.isDenied || storageStatus.isDenied) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -80,10 +98,11 @@ class _TabLayoutState extends State<TabLayout> with SingleTickerProviderStateMix
     try {
       if (await _checkPermissions()) {
         final directory = await getTemporaryDirectory();
-        _recordedFilePath = '${directory.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
-        
+        _recordedFilePath =
+            '${directory.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
         print('Recording file path: $_recordedFilePath');
-        
+
         if (await _audioRecorder.hasPermission()) {
           await _audioRecorder.start(
             const RecordConfig(
@@ -148,10 +167,10 @@ class _TabLayoutState extends State<TabLayout> with SingleTickerProviderStateMix
       const uploadUrl = 'https://api.assemblyai.com/v2/upload';
       final file = File(filePath);
       final bytes = await file.readAsBytes();
-      
+
       print('Uploading file: $filePath');
       print('File size: ${bytes.length} bytes');
-      
+
       final uploadResponse = await http.post(
         Uri.parse(uploadUrl),
         headers: {
@@ -189,7 +208,8 @@ class _TabLayoutState extends State<TabLayout> with SingleTickerProviderStateMix
       print('Transcript response body: ${transcriptResponse.body}');
 
       if (transcriptResponse.statusCode != 200) {
-        throw Exception('Failed to start transcription: ${transcriptResponse.body}');
+        throw Exception(
+            'Failed to start transcription: ${transcriptResponse.body}');
       }
 
       final transcriptData = json.decode(transcriptResponse.body);
@@ -205,18 +225,19 @@ class _TabLayoutState extends State<TabLayout> with SingleTickerProviderStateMix
         );
 
         if (statusResponse.statusCode != 200) {
-          throw Exception('Failed to get transcription status: ${statusResponse.body}');
+          throw Exception(
+              'Failed to get transcription status: ${statusResponse.body}');
         }
 
         final statusData = json.decode(statusResponse.body);
         print('Transcription status: ${statusData['status']}');
-        
+
         if (statusData['status'] == 'completed') {
           setState(() {
             _transcribedText = statusData['text'];
             _isTranscribing = false;
           });
-          
+
           // Now analyze the text with DeepSeek
           await _analyzeWithDeepSeek(_transcribedText);
           break;
@@ -237,24 +258,34 @@ class _TabLayoutState extends State<TabLayout> with SingleTickerProviderStateMix
 
   Future<void> _analyzeWithDeepSeek(String text) async {
     if (text.isEmpty) return;
-    
+
     setState(() {
       _isAnalyzing = true;
     });
-    
+
     try {
       final result = await _deepseekService.analyzeTranscription(text);
-      
+
       setState(() {
         if (result['todos'] != null && result['todos'].isNotEmpty) {
-          _todos.addAll(List<String>.from(result['todos']));
+          final todoStrings = List<String>.from(result['todos']);
+          _todos.addAll(todoStrings.map((todoText) => TodoItem(
+                task: todoText,
+                dueDate:
+                    '', // Empty date since it's not parsed from the transcription
+              )));
         }
         if (result['ideas'] != null && result['ideas'].isNotEmpty) {
-          _ideas.addAll(List<String>.from(result['ideas']));
+          final ideaStrings = List<String>.from(result['ideas']);
+          _ideas.addAll(ideaStrings.map((ideaText) => IdeaItem(
+                idea: ideaText,
+                date:
+                    '', // Empty date since it's not parsed from the transcription
+              )));
         }
         _isAnalyzing = false;
       });
-      
+
       // Show a snackbar with the results
       final String message = _buildResultMessage(result);
       if (message.isNotEmpty) {
@@ -272,11 +303,11 @@ class _TabLayoutState extends State<TabLayout> with SingleTickerProviderStateMix
       });
     }
   }
-  
+
   String _buildResultMessage(Map<String, dynamic> result) {
     final todoCount = result['todos']?.length ?? 0;
     final ideaCount = result['ideas']?.length ?? 0;
-    
+
     if (todoCount > 0 && ideaCount > 0) {
       return 'Added $todoCount to-dos and $ideaCount ideas';
     } else if (todoCount > 0) {
@@ -284,7 +315,7 @@ class _TabLayoutState extends State<TabLayout> with SingleTickerProviderStateMix
     } else if (ideaCount > 0) {
       return 'Added $ideaCount idea${ideaCount > 1 ? 's' : ''}';
     }
-    
+
     return '';
   }
 
@@ -297,7 +328,7 @@ class _TabLayoutState extends State<TabLayout> with SingleTickerProviderStateMix
           _isPaused = false;
         });
         print('Recording saved to: $path');
-        
+
         // Start transcription
         if (path != null) {
           await _transcribeAudio(path);
@@ -317,168 +348,357 @@ class _TabLayoutState extends State<TabLayout> with SingleTickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text('Zelo'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'To-dos'),
-            Tab(text: 'Ideas'),
-          ],
-        ),
-      ),
-      body: Stack(
-        children: [
-          TabBarView(
-            controller: _tabController,
-            children: [
-              // To-dos tab
-              Padding(
-                padding: const EdgeInsets.only(bottom: 80.0),
-                child: _todos.isEmpty
-                    ? const Center(
-                        child: Text('No to-dos yet. Record your first to-do!'),
-                      )
-                    : ListView.builder(
-                        itemCount: _todos.length,
-                        itemBuilder: (context, index) {
-                          return Card(
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            child: ListTile(
-                              title: Text(_todos[index]),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.delete),
-                                onPressed: () {
-                                  setState(() {
-                                    _todos.removeAt(index);
-                                  });
-                                },
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-              
-              // Ideas tab
-              Padding(
-                padding: const EdgeInsets.only(bottom: 80.0),
-                child: _ideas.isEmpty
-                    ? const Center(
-                        child: Text('No ideas yet. Record your first idea!'),
-                      )
-                    : ListView.builder(
-                        itemCount: _ideas.length,
-                        itemBuilder: (context, index) {
-                          return Card(
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            child: ListTile(
-                              title: Text(_ideas[index]),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.delete),
-                                onPressed: () {
-                                  setState(() {
-                                    _ideas.removeAt(index);
-                                  });
-                                },
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-          
-          if (_isTranscribing || _isAnalyzing)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black.withOpacity(0.3),
-                child: Center(
-                  child: Card(
-                    color: Theme.of(context).cardColor,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const CircularProgressIndicator(),
-                          const SizedBox(height: 16),
-                          Text(
-                            _isTranscribing 
-                              ? 'Transcribing your recording...' 
-                              : 'Analyzing for todos and ideas...',
-                            style: Theme.of(context).textTheme.titleMedium,
+      backgroundColor: const Color(0xFFF5F5F7),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(
+                  bottom: 80.0, top: 16.0, left: 16.0, right: 16.0),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // To-do Box
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 16.0),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
                           ),
                         ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Header
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16.0, vertical: 12.0),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFF5F5F7),
+                              borderRadius: BorderRadius.only(
+                                topLeft: Radius.circular(12),
+                                topRight: Radius.circular(12),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.check_box_outlined,
+                                  color: Colors.black,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'to-do',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Content - Todo list
+                          Container(
+                            color: Colors.white,
+                            child: _todos.isEmpty
+                                ? const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16.0),
+                                      child: Text(
+                                          'No to-dos yet. Record your first to-do!'),
+                                    ),
+                                  )
+                                : Column(
+                                    children: _todos.map((todo) {
+                                      return Container(
+                                        decoration: BoxDecoration(
+                                          border: Border(
+                                            bottom: BorderSide(
+                                              color:
+                                                  Colors.grey.withOpacity(0.2),
+                                              width: 0.5,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 16.0, vertical: 8.0),
+                                          child: Row(
+                                            children: [
+                                              SizedBox(
+                                                width: 24,
+                                                height: 24,
+                                                child: Checkbox(
+                                                  value: todo.completed,
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            4.0),
+                                                  ),
+                                                  side: const BorderSide(
+                                                      width: 1.5,
+                                                      color: Colors.black),
+                                                  onChanged: (value) {
+                                                    setState(() {
+                                                      todo.completed =
+                                                          value ?? false;
+                                                    });
+                                                  },
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Text(
+                                                  todo.task,
+                                                  style: TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight:
+                                                        FontWeight.normal,
+                                                    decoration: todo.completed
+                                                        ? TextDecoration
+                                                            .lineThrough
+                                                        : null,
+                                                    color: todo.completed
+                                                        ? Colors.grey.shade400
+                                                        : Colors.black,
+                                                  ),
+                                                ),
+                                              ),
+                                              Text(
+                                                todo.dueDate,
+                                                style: TextStyle(
+                                                  fontSize: 16,
+                                                  color: todo.completed
+                                                      ? Colors.grey.shade400
+                                                      : Colors.grey[400],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Ideas Box
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Header
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16.0, vertical: 12.0),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFF5F5F7),
+                              borderRadius: BorderRadius.only(
+                                topLeft: Radius.circular(12),
+                                topRight: Radius.circular(12),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.lightbulb_outline,
+                                  color: Colors.black,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'ideas',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Content - Ideas list
+                          Container(
+                            color: Colors.white,
+                            child: _ideas.isEmpty
+                                ? const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16.0),
+                                      child: Text(
+                                          'No ideas yet. Record your first idea!'),
+                                    ),
+                                  )
+                                : Column(
+                                    children: _ideas.map((idea) {
+                                      return Container(
+                                        decoration: BoxDecoration(
+                                          border: Border(
+                                            bottom: BorderSide(
+                                              color:
+                                                  Colors.grey.withOpacity(0.2),
+                                              width: 0.5,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 16.0, vertical: 16.0),
+                                          child: Row(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Container(
+                                                margin: const EdgeInsets.only(
+                                                    top: 8),
+                                                width: 6,
+                                                height: 6,
+                                                decoration: const BoxDecoration(
+                                                  color: Colors.black,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Text(
+                                                  idea.idea,
+                                                  style: const TextStyle(
+                                                    fontSize: 16,
+                                                    color: Colors.black,
+                                                  ),
+                                                ),
+                                              ),
+                                              Text(
+                                                idea.date,
+                                                style: TextStyle(
+                                                  fontSize: 16,
+                                                  color: Colors.grey[400],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            if (_isTranscribing || _isAnalyzing)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withOpacity(0.3),
+                  child: Center(
+                    child: Card(
+                      color: Theme.of(context).cardColor,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const CircularProgressIndicator(),
+                            const SizedBox(height: 16),
+                            Text(
+                              _isTranscribing
+                                  ? 'Transcribing your recording...'
+                                  : 'Analyzing for todos and ideas...',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-          
-          // Fixed recording button at the bottom of the screen
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 16,
-            child: Container(
-              alignment: Alignment.center,
-              child: !_isRecording
-                ? FloatingActionButton.extended(
-                    onPressed: _startRecording,
-                    icon: const Icon(Icons.mic),
-                    label: const Text('Record'),
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                  )
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      FloatingActionButton(
-                        onPressed: _pauseRecording,
-                        tooltip: _isPaused ? 'Resume' : 'Pause',
-                        backgroundColor: Colors.orange,
-                        child: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
+
+            // Fixed recording button at the bottom of the screen
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 16,
+              child: Container(
+                alignment: Alignment.center,
+                child: !_isRecording
+                    ? FloatingActionButton.extended(
+                        onPressed: _startRecording,
+                        icon: const Icon(Icons.mic),
+                        label: const Text('Record'),
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          FloatingActionButton(
+                            onPressed: _pauseRecording,
+                            tooltip: _isPaused ? 'Resume' : 'Pause',
+                            backgroundColor: Colors.orange,
+                            child: Icon(
+                                _isPaused ? Icons.play_arrow : Icons.pause),
+                          ),
+                          const SizedBox(width: 16),
+                          FloatingActionButton(
+                            onPressed: _stopRecording,
+                            tooltip: 'Stop',
+                            backgroundColor: Colors.red,
+                            child: const Icon(Icons.stop),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 16),
-                      FloatingActionButton(
-                        onPressed: _stopRecording,
-                        tooltip: 'Stop',
-                        backgroundColor: Colors.red,
-                        child: const Icon(Icons.stop),
-                      ),
-                    ],
-                  ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-class TodoTab extends StatelessWidget {
-  const TodoTab({super.key});
+class TodoItem {
+  String task;
+  String dueDate;
+  bool completed;
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(); // This is now handled in the main TabLayout
-  }
+  TodoItem({
+    required this.task,
+    required this.dueDate,
+    this.completed = false,
+  });
 }
 
-class IdeasTab extends StatelessWidget {
-  const IdeasTab({super.key});
+class IdeaItem {
+  String idea;
+  String date;
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(); // This is now handled in the main TabLayout
-  }
+  IdeaItem({
+    required this.idea,
+    required this.date,
+  });
 }

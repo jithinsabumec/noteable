@@ -1,15 +1,37 @@
-# zelo
+# Zelo
 
-A new Flutter project.
+A Flutter project using the Geist font for a modern, clean UI.
 
 ## Getting Started
 
-This project is a starting point for a Flutter application.
+This project uses Geist font from Vercel.
 
-A few resources to get you started if this is your first Flutter project:
+### Font Installation
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+To install the Geist font:
+
+1. Run `npm install geist` to download the font package
+2. Copy the font files to the `fonts` directory:
+   ```
+   mkdir -p fonts
+   cp node_modules/geist/dist/fonts/geist-sans/Geist-Regular.ttf fonts/
+   cp node_modules/geist/dist/fonts/geist-sans/Geist-Medium.ttf fonts/
+   cp node_modules/geist/dist/fonts/geist-sans/Geist-Bold.ttf fonts/
+   ```
+3. Update your `pubspec.yaml` to include the font:
+   ```yaml
+   fonts:
+     - family: Geist
+       fonts:
+         - asset: fonts/Geist-Regular.ttf
+         - asset: fonts/Geist-Medium.ttf
+           weight: 500
+         - asset: fonts/Geist-Bold.ttf
+           weight: 700
+   ```
+4. Run `flutter pub get` to update your dependencies
+
+## Flutter Resources
 
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
