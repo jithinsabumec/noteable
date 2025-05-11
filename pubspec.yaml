@@ -97,6 +97,11 @@ flutter:
           weight: 500
         - asset: fonts/Geist-Bold.ttf
           weight: 700
+    - family: InstrumentSerif
+      fonts:
+        - asset: fonts/InstrumentSerif-Regular.ttf
+        - asset: fonts/InstrumentSerif-Italic.ttf
+          style: italic
   
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
