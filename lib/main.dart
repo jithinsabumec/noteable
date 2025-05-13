@@ -7,6 +7,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'config.dart';
 import 'services/deepseek_service.dart';
+import 'dart:async';
+import 'dart:math' as math;
+import 'package:device_info_plus/device_info_plus.dart';
 
 void main() {
   runApp(const MyApp());
@@ -47,6 +50,7 @@ class _MainScreenState extends State<MainScreen>
   bool _isAnalyzing = false;
   final List<TodoItem> _todos = [];
   final List<IdeaItem> _ideas = [];
+  final DeviceInfoPlugin _deviceInfoPlugin = DeviceInfoPlugin();
 
   @override
   void initState() {
@@ -79,59 +83,300 @@ class _MainScreenState extends State<MainScreen>
   }
 
   Future<bool> _checkPermissions() async {
-    final micStatus = await Permission.microphone.request();
-    final storageStatus = await Permission.storage.request();
+    // Always check microphone permission
+    final micStatus = await Permission.microphone.status;
 
-    if (micStatus.isDenied || storageStatus.isDenied) {
+    // For Android 11+, we need MANAGE_EXTERNAL_STORAGE permission
+    // For Android 10 and below, we need regular storage permission
+    bool needsManageStorage = false;
+    bool needsRegularStorage = false;
+
+    if (Platform.isAndroid) {
+      try {
+        // Use device info plugin to get Android version
+        final androidInfo = await _deviceInfoPlugin.androidInfo;
+        final sdkVersion = androidInfo.version.sdkInt;
+
+        needsManageStorage = sdkVersion >= 30; // Android 11+
+        needsRegularStorage = sdkVersion < 30; // Android 10 and below
+      } catch (e) {
+        // If there's an error determining the version, request both permissions
+        // Better to ask for more permissions than to have insufficient access
+        print('Error determining Android version: $e');
+        needsRegularStorage = true;
+      }
+    } else {
+      // For non-Android platforms, use regular storage permission
+      needsRegularStorage = true;
+    }
+
+    // Check storage permissions based on Android version
+    final regularStorageStatus = needsRegularStorage
+        ? await Permission.storage.status
+        : PermissionStatus.granted;
+    final manageStorageStatus = needsManageStorage
+        ? await Permission.manageExternalStorage.status
+        : PermissionStatus.granted;
+
+    // Consider storage permission granted if either regular storage is granted (Android 10-)
+    // or manage storage is granted (Android 11+)
+    final storagePermissionGranted =
+        (needsRegularStorage && regularStorageStatus.isGranted) ||
+            (needsManageStorage && manageStorageStatus.isGranted);
+
+    // If already granted, return true immediately
+    if (micStatus.isGranted && storagePermissionGranted) {
+      return true;
+    }
+
+    // Build permission message based on Android version
+    String permissionMessage =
+        'Zelo needs microphone access to record your voice';
+    if (needsManageStorage) {
+      permissionMessage += ' and storage access to save recordings';
+    } else if (needsRegularStorage) {
+      permissionMessage += ' and storage access to save recordings';
+    }
+
+    // Show explanation dialog if permissions weren't previously granted
+    if (micStatus.isDenied ||
+        (needsRegularStorage && regularStorageStatus.isDenied) ||
+        (needsManageStorage && manageStorageStatus.isDenied)) {
+      // Show explanation before requesting
+      final bool shouldRequest = await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              title: const Text('Permissions Required'),
+              content: Text(
+                  '$permissionMessage. These permissions are necessary for the app to function properly.'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Continue'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+
+      if (!shouldRequest) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Permissions are required to use the recording feature'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+        return false;
+      }
+    }
+
+    // Handle permanently denied cases first
+    if (micStatus.isPermanentlyDenied ||
+        (needsRegularStorage && regularStorageStatus.isPermanentlyDenied) ||
+        (needsManageStorage && manageStorageStatus.isPermanentlyDenied)) {
+      return _handlePermanentlyDeniedPermissions(
+          needsRegularStorage, needsManageStorage);
+    }
+
+    // Request permissions
+    final newMicStatus = await Permission.microphone.request();
+
+    // Request appropriate storage permissions based on Android version
+    PermissionStatus newRegularStorageStatus = PermissionStatus.granted;
+    PermissionStatus newManageStorageStatus = PermissionStatus.granted;
+
+    if (needsRegularStorage) {
+      newRegularStorageStatus = await Permission.storage.request();
+    }
+
+    if (needsManageStorage) {
+      // For MANAGE_EXTERNAL_STORAGE, we need to send users to settings on Android 11+
+      newManageStorageStatus = await Permission.manageExternalStorage.request();
+
+      // If not granted, try to send user to settings
+      if (!newManageStorageStatus.isGranted) {
+        final shouldOpenSettings = await showDialog<bool>(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => AlertDialog(
+                title: const Text('Special Permission Required'),
+                content: const Text(
+                    'For Android 11 and above, Zelo needs special storage permission. '
+                    'Please enable "Allow management of all files" for Zelo in the next screen.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    child: const Text('Open Settings'),
+                  ),
+                ],
+              ),
+            ) ??
+            false;
+
+        if (shouldOpenSettings) {
+          await openAppSettings();
+          // We need to check the permission again after returning from settings
+          newManageStorageStatus =
+              await Permission.manageExternalStorage.status;
+        }
+      }
+    }
+
+    // Check for permanently denied after request
+    if (newMicStatus.isPermanentlyDenied ||
+        (needsRegularStorage && newRegularStorageStatus.isPermanentlyDenied) ||
+        (needsManageStorage && newManageStorageStatus.isPermanentlyDenied)) {
+      return _handlePermanentlyDeniedPermissions(
+          needsRegularStorage, needsManageStorage);
+    }
+
+    // Check for regular denied
+    final storagePermissionDenied =
+        (needsRegularStorage && newRegularStorageStatus.isDenied) ||
+            (needsManageStorage && newManageStorageStatus.isDenied);
+
+    if (newMicStatus.isDenied || storagePermissionDenied) {
+      String deniedMessage = 'Microphone';
+      if (storagePermissionDenied) {
+        deniedMessage += ' and storage';
+      }
+      deniedMessage += ' permissions are required to record';
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Microphone and storage permissions are required'),
-          duration: Duration(seconds: 2),
+        SnackBar(
+          content: Text(deniedMessage),
+          duration: const Duration(seconds: 3),
         ),
       );
       return false;
     }
-    return true;
+
+    // Storage permission is granted if either regular storage or manage storage is granted
+    final newStoragePermissionGranted =
+        (needsRegularStorage && newRegularStorageStatus.isGranted) ||
+            (needsManageStorage && newManageStorageStatus.isGranted);
+
+    // All permissions granted
+    return newMicStatus.isGranted && newStoragePermissionGranted;
+  }
+
+  Future<bool> _handlePermanentlyDeniedPermissions(
+      bool needsRegularStorage, bool needsManageStorage) async {
+    String permissionMessage = 'Microphone';
+    if (needsRegularStorage || needsManageStorage) {
+      permissionMessage += ' and storage';
+    }
+    permissionMessage += ' permissions are required for this app to work.';
+
+    final result = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Text('Permissions Required'),
+            content: Text(
+                '$permissionMessage Please enable them in your device settings.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop(true);
+                },
+                child: const Text('Open Settings'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (result) {
+      await openAppSettings();
+      // After returning from settings, check permissions again
+      final micStatus = await Permission.microphone.status;
+
+      // Check appropriate storage permissions based on Android version
+      PermissionStatus regularStorageStatus = PermissionStatus.granted;
+      PermissionStatus manageStorageStatus = PermissionStatus.granted;
+
+      if (needsRegularStorage) {
+        regularStorageStatus = await Permission.storage.status;
+      }
+
+      if (needsManageStorage) {
+        manageStorageStatus = await Permission.manageExternalStorage.status;
+      }
+
+      // Storage permission is granted if either regular storage or manage storage is granted
+      final storagePermissionGranted =
+          (needsRegularStorage && regularStorageStatus.isGranted) ||
+              (needsManageStorage && manageStorageStatus.isGranted);
+
+      if (micStatus.isGranted && storagePermissionGranted) {
+        return true;
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Permissions are still not granted'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+        return false;
+      }
+    }
+
+    return false;
   }
 
   Future<void> _startRecording() async {
     try {
-      if (await _checkPermissions()) {
-        final directory = await getTemporaryDirectory();
-        _recordedFilePath =
-            '${directory.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      // Dismiss keyboard explicitly to ensure clean UI
+      FocusManager.instance.primaryFocus?.unfocus();
 
-        print('Recording file path: $_recordedFilePath');
-
-        if (await _audioRecorder.hasPermission()) {
-          await _audioRecorder.start(
-            const RecordConfig(
-              encoder: AudioEncoder.aacLc,
-              bitRate: 128000,
-              sampleRate: 44100,
-            ),
-            path: _recordedFilePath!,
-          );
-          setState(() {
-            _isRecording = true;
-            _isPaused = false;
-            _transcribedText = '';
-          });
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('No permission to record audio'),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
+      // Check permissions before starting recording
+      final permissionsGranted = await _checkPermissions();
+      if (!permissionsGranted) {
+        return;
       }
+
+      final directory = await getTemporaryDirectory();
+      _recordedFilePath =
+          '${directory.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+      print('Recording file path: $_recordedFilePath');
+
+      // Start recording directly without checking permissions again
+      await _audioRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 128000,
+          sampleRate: 44100,
+        ),
+        path: _recordedFilePath!,
+      );
+      setState(() {
+        _isRecording = true;
+        _isPaused = false;
+        _transcribedText = '';
+      });
     } catch (e) {
       print('Error starting recording: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error starting recording: $e'),
-          duration: const Duration(seconds: 2),
+          content: Text(
+              'Error starting recording: ${e.toString().substring(0, math.min(100, e.toString().length))}'),
+          duration: const Duration(seconds: 3),
         ),
       );
     }
@@ -348,7 +593,7 @@ class _MainScreenState extends State<MainScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F7),
+      backgroundColor: Colors.white,
       body: SafeArea(
         child: Stack(
           children: [
@@ -363,13 +608,18 @@ class _MainScreenState extends State<MainScreen>
                     Container(
                       margin: const EdgeInsets.only(bottom: 16.0),
                       decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
+                        color: const Color(0xFFEEEEEE),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: const Color(0xFFE4E4E4),
+                          width: 1,
+                        ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 10,
-                            offset: const Offset(0, 2),
+                            color: Color(0x19000000),
+                            blurRadius: 17.60,
+                            offset: const Offset(0, 4),
+                            spreadRadius: 0,
                           ),
                         ],
                       ),
@@ -378,13 +628,13 @@ class _MainScreenState extends State<MainScreen>
                         children: [
                           // Header
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16.0, vertical: 12.0),
+                            padding: const EdgeInsets.only(
+                                top: 8.0, left: 16.0, right: 16.0, bottom: 8.0),
                             decoration: const BoxDecoration(
-                              color: Color(0xFFF5F5F7),
+                              color: Color(0xFFEEEEEE),
                               borderRadius: BorderRadius.only(
-                                topLeft: Radius.circular(12),
-                                topRight: Radius.circular(12),
+                                topLeft: Radius.circular(8),
+                                topRight: Radius.circular(8),
                               ),
                             ),
                             child: Row(
@@ -397,11 +647,12 @@ class _MainScreenState extends State<MainScreen>
                                 const SizedBox(width: 8),
                                 Text(
                                   'to-do',
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 20,
                                     fontWeight: FontWeight.w600,
-                                    color: Colors.black,
+                                    color: Color(0xFF282828),
                                     fontFamily: 'InstrumentSerif',
+                                    letterSpacing: 0,
                                   ),
                                 ),
                               ],
@@ -409,7 +660,18 @@ class _MainScreenState extends State<MainScreen>
                           ),
                           // Content - Todo list
                           Container(
-                            color: Colors.white,
+                            margin: const EdgeInsets.only(
+                                top: 0, left: 4.0, right: 4.0, bottom: 4.0),
+                            padding: EdgeInsets.zero,
+                            clipBehavior: Clip.antiAlias,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: const Color(0xFFE1E1E1),
+                                width: 1,
+                              ),
+                            ),
                             child: _todos.isEmpty
                                 ? const Center(
                                     child: Padding(
@@ -419,41 +681,58 @@ class _MainScreenState extends State<MainScreen>
                                     ),
                                   )
                                 : Column(
-                                    children: _todos.map((todo) {
+                                    children:
+                                        _todos.asMap().entries.map((entry) {
+                                      final index = entry.key;
+                                      final todo = entry.value;
                                       return Container(
                                         decoration: BoxDecoration(
-                                          border: Border(
-                                            bottom: BorderSide(
-                                              color:
-                                                  Colors.grey.withOpacity(0.2),
-                                              width: 0.5,
-                                            ),
-                                          ),
+                                          color: Colors.white,
+                                          borderRadius:
+                                              BorderRadius.circular(6),
                                         ),
                                         child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 16.0, vertical: 8.0),
+                                          padding: EdgeInsets.only(
+                                            left: 12.0,
+                                            right: 12.0,
+                                            top: index == 0 ? 12.0 : 0.0,
+                                            bottom: 8.0,
+                                          ),
                                           child: Row(
                                             children: [
-                                              SizedBox(
-                                                width: 24,
-                                                height: 24,
-                                                child: Checkbox(
-                                                  value: todo.completed,
-                                                  shape: RoundedRectangleBorder(
+                                              GestureDetector(
+                                                onTap: () {
+                                                  setState(() {
+                                                    todo.completed =
+                                                        !todo.completed;
+                                                  });
+                                                },
+                                                child: Container(
+                                                  width: 16,
+                                                  height: 16,
+                                                  decoration: BoxDecoration(
+                                                    color: todo.completed
+                                                        ? Colors.black
+                                                        : Colors.white,
                                                     borderRadius:
                                                         BorderRadius.circular(
                                                             4.0),
+                                                    border: Border.all(
+                                                      width: 1.0,
+                                                      color: const Color(
+                                                          0xFF282828),
+                                                    ),
                                                   ),
-                                                  side: const BorderSide(
-                                                      width: 1.5,
-                                                      color: Colors.black),
-                                                  onChanged: (value) {
-                                                    setState(() {
-                                                      todo.completed =
-                                                          value ?? false;
-                                                    });
-                                                  },
+                                                  child: todo.completed
+                                                      ? Center(
+                                                          child: CustomPaint(
+                                                            size: const Size(
+                                                                10, 7.5),
+                                                            painter:
+                                                                CheckmarkPainter(),
+                                                          ),
+                                                        )
+                                                      : null,
                                                 ),
                                               ),
                                               const SizedBox(width: 12),
@@ -461,12 +740,16 @@ class _MainScreenState extends State<MainScreen>
                                                 child: Text(
                                                   todo.task,
                                                   style: TextStyle(
-                                                    fontSize: 16,
+                                                    fontSize: 18,
                                                     fontWeight:
                                                         FontWeight.normal,
                                                     decoration: todo.completed
                                                         ? TextDecoration
                                                             .lineThrough
+                                                        : null,
+                                                    decorationColor: todo
+                                                            .completed
+                                                        ? Colors.grey.shade400
                                                         : null,
                                                     color: todo.completed
                                                         ? Colors.grey.shade400
@@ -480,7 +763,7 @@ class _MainScreenState extends State<MainScreen>
                                                   fontSize: 16,
                                                   color: todo.completed
                                                       ? Colors.grey.shade400
-                                                      : Colors.grey[400],
+                                                      : const Color(0xFF9D9D9D),
                                                 ),
                                               ),
                                             ],
@@ -497,13 +780,18 @@ class _MainScreenState extends State<MainScreen>
                     // Ideas Box
                     Container(
                       decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
+                        color: const Color(0xFFEEEEEE),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: const Color(0xFFE4E4E4),
+                          width: 1,
+                        ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 10,
-                            offset: const Offset(0, 2),
+                            color: Color(0x19000000),
+                            blurRadius: 17.60,
+                            offset: const Offset(0, 4),
+                            spreadRadius: 0,
                           ),
                         ],
                       ),
@@ -512,13 +800,13 @@ class _MainScreenState extends State<MainScreen>
                         children: [
                           // Header
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16.0, vertical: 12.0),
+                            padding: const EdgeInsets.only(
+                                top: 8.0, left: 16.0, right: 16.0, bottom: 8.0),
                             decoration: const BoxDecoration(
-                              color: Color(0xFFF5F5F7),
+                              color: Color(0xFFEEEEEE),
                               borderRadius: BorderRadius.only(
-                                topLeft: Radius.circular(12),
-                                topRight: Radius.circular(12),
+                                topLeft: Radius.circular(8),
+                                topRight: Radius.circular(8),
                               ),
                             ),
                             child: Row(
@@ -531,11 +819,12 @@ class _MainScreenState extends State<MainScreen>
                                 const SizedBox(width: 8),
                                 Text(
                                   'ideas',
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 20,
                                     fontWeight: FontWeight.w600,
-                                    color: Colors.black,
+                                    color: Color(0xFF282828),
                                     fontFamily: 'InstrumentSerif',
+                                    letterSpacing: 0,
                                   ),
                                 ),
                               ],
@@ -543,7 +832,18 @@ class _MainScreenState extends State<MainScreen>
                           ),
                           // Content - Ideas list
                           Container(
-                            color: Colors.white,
+                            margin: const EdgeInsets.only(
+                                top: 8.0, left: 4.0, right: 4.0, bottom: 4.0),
+                            padding: EdgeInsets.zero,
+                            clipBehavior: Clip.antiAlias,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: const Color(0xFFE1E1E1),
+                                width: 1,
+                              ),
+                            ),
                             child: _ideas.isEmpty
                                 ? const Center(
                                     child: Padding(
@@ -553,20 +853,23 @@ class _MainScreenState extends State<MainScreen>
                                     ),
                                   )
                                 : Column(
-                                    children: _ideas.map((idea) {
+                                    children:
+                                        _ideas.asMap().entries.map((entry) {
+                                      final index = entry.key;
+                                      final idea = entry.value;
                                       return Container(
                                         decoration: BoxDecoration(
-                                          border: Border(
-                                            bottom: BorderSide(
-                                              color:
-                                                  Colors.grey.withOpacity(0.2),
-                                              width: 0.5,
-                                            ),
-                                          ),
+                                          color: Colors.white,
+                                          borderRadius:
+                                              BorderRadius.circular(6),
                                         ),
                                         child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 16.0, vertical: 16.0),
+                                          padding: EdgeInsets.only(
+                                            left: 12.0,
+                                            right: 12.0,
+                                            top: index == 0 ? 12.0 : 16.0,
+                                            bottom: 16.0,
+                                          ),
                                           child: Row(
                                             crossAxisAlignment:
                                                 CrossAxisAlignment.start,
@@ -586,16 +889,16 @@ class _MainScreenState extends State<MainScreen>
                                                 child: Text(
                                                   idea.idea,
                                                   style: const TextStyle(
-                                                    fontSize: 16,
+                                                    fontSize: 18,
                                                     color: Colors.black,
                                                   ),
                                                 ),
                                               ),
                                               Text(
                                                 idea.date,
-                                                style: TextStyle(
+                                                style: const TextStyle(
                                                   fontSize: 16,
-                                                  color: Colors.grey[400],
+                                                  color: Color(0xFF9D9D9D),
                                                 ),
                                               ),
                                             ],
@@ -703,4 +1006,30 @@ class IdeaItem {
     required this.idea,
     required this.date,
   });
+}
+
+class CheckmarkPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 1.2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+
+    // Scale factor to enlarge the original SVG path
+    const scale = 1.25;
+
+    final path = Path();
+    // Scale the original coordinates
+    path.moveTo(1.39636 * scale, 3.37194 * scale);
+    path.lineTo(3.13211 * scale, 4.85972 * scale);
+    path.lineTo(6.60359 * scale, 1.14027 * scale);
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
