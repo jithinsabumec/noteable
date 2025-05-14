@@ -19,13 +19,15 @@ class DeepseekService {
           'messages': [
             {
               'role': 'system',
-              'content':
-                  'You are an assistant that analyzes transcribed text and extracts todos and ideas from it. Return a JSON with "todos" and "ideas" arrays. If there are no todos or ideas, return an empty array for that category.'
+              'content': 'You are an advanced assistant that analyzes transcribed speech and extracts two types of information: notes and tasks.\n\n'
+                  'NOTES: Any general information, thoughts, reflections, or journaling content that is not an explicit task.\n\n'
+                  'TASKS: Explicit to-do items or things the user clearly intends to accomplish. Only include as tasks things that are clearly actionable and the user intends to do.\n\n'
+                  'Return a JSON with "notes" and "tasks" arrays. If there are no notes or tasks, return an empty array for that category.'
             },
             {
               'role': 'user',
               'content':
-                  'Analyze this transcribed text and extract any todos and ideas: "$transcription"'
+                  'Analyze this transcribed speech and extract notes and tasks. Be thorough and make sure every important piece of information is captured either as a note or task: "$transcription"'
             }
           ],
           'response_format': {'type': 'json_object'}
@@ -36,6 +38,15 @@ class DeepseekService {
         final data = json.decode(response.body);
         final content = data['choices'][0]['message']['content'];
         final result = json.decode(content);
+
+        // Make sure the result has the correct structure
+        if (!result.containsKey('notes')) {
+          result['notes'] = [];
+        }
+        if (!result.containsKey('tasks')) {
+          result['tasks'] = [];
+        }
+
         return result;
       } else {
         throw Exception(
@@ -43,7 +54,7 @@ class DeepseekService {
       }
     } catch (e) {
       print('Error analyzing transcription: $e');
-      return {'todos': [], 'ideas': []};
+      return {'notes': [], 'tasks': []};
     }
   }
 }

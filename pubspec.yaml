@@ -34,11 +34,16 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.2
-  record: ^5.0.4
+  record: ^6.0.0
   permission_handler: ^11.3.0
   path_provider: ^2.1.2
   http: ^1.2.0
-  device_info_plus: ^11.4.0
+  flutter_svg: ^2.0.7
+  device_info_plus: ^9.1.2
+  
+  # Local storage
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
 
 dev_dependencies:
   flutter_test:
@@ -49,7 +54,9 @@ dev_dependencies:
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
-  flutter_lints: ^2.0.0
+  flutter_lints: ^3.0.0
+  hive_generator: ^2.0.1
+  build_runner: ^2.4.8
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -93,16 +100,26 @@ flutter:
   fonts:
     - family: Geist
       fonts:
-        - asset: fonts/Geist-Regular.ttf
-        - asset: fonts/Geist-Medium.ttf
-          weight: 500
-        - asset: fonts/Geist-Bold.ttf
+        - asset: assets/fonts/Geist-Regular.otf
+        - asset: assets/fonts/Geist-Bold.otf
           weight: 700
+        - asset: assets/fonts/Geist-SemiBold.otf
+          weight: 600
+          
+    - family: GeistMono
+      fonts:
+        - asset: assets/fonts/GeistMono-Regular.otf
+        - asset: assets/fonts/GeistMono-SemiBold.otf
+          weight: 600
+        - asset: assets/fonts/GeistMono-Bold.otf
+          weight: 700
+          
     - family: InstrumentSerif
       fonts:
-        - asset: fonts/InstrumentSerif-Regular.ttf
-        - asset: fonts/InstrumentSerif-Italic.ttf
-          style: italic
+        - asset: assets/fonts/InstrumentSerif-Regular.ttf
   
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+  assets:
+    - assets/icons/
