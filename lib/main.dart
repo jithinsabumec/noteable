@@ -13,8 +13,8 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'time_icons.dart';
-import 'package:zelo/services/storage_service.dart';
-import 'package:zelo/models/timeline_entry.dart' as models;
+import 'package:noteable/services/storage_service.dart';
+import 'package:noteable/models/timeline_entry.dart' as models;
 import 'package:flutter_svg/flutter_svg.dart'; // Add this import
 import 'package:rive/rive.dart' as rive; // Import Rive with an alias
 import 'package:flutter/services.dart'; // Import for rootBundle
@@ -43,7 +43,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Zelo',
+      title: 'Noteable',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         fontFamily: 'Geist',
@@ -102,9 +102,19 @@ class _MainScreenState extends State<MainScreen>
   List<FocusNode> _sheetFocusNodes =
       []; // Moved here to be accessible for disposal
 
+  // Add a PageController for horizontal sliding between weeks
+  late PageController _pageController;
+  final int _initialPage =
+      1000; // Start at a high number to allow going back in time
+
   @override
   void initState() {
     super.initState();
+    // Initialize the PageController
+    _pageController = PageController(
+      initialPage: _initialPage,
+      viewportFraction: 1.0,
+    );
     // Clear any placeholder data (run this only once when testing)
     _clearPlaceholderData();
     // Load entries for the current date
@@ -152,6 +162,7 @@ class _MainScreenState extends State<MainScreen>
     }
     _sheetFocusNodes.clear();
     _animationSequenceTimer?.cancel(); // Cancel animation sequence timer
+    _pageController.dispose(); // Dispose the PageController
     super.dispose();
   }
 
@@ -189,7 +200,11 @@ class _MainScreenState extends State<MainScreen>
             // Find appropriate entry or create new one
             bool found = false;
             for (var uiEntry in _timelineEntriesByDate[timestamp]!) {
+              // Add note to the list and update itemOrder
+              final newNoteIndex = uiEntry.notes.length;
               uiEntry.notes.add(entry.content);
+              uiEntry.itemOrder.add(
+                  TimelineItemRef(type: ItemType.note, index: newNoteIndex));
               found = true;
               break;
             }
@@ -202,7 +217,7 @@ class _MainScreenState extends State<MainScreen>
                 tasks: [],
                 itemOrder: [], // Initialize empty
               ));
-              _timelineEntriesByDate[timestamp]!.first.itemOrder.add(
+              _timelineEntriesByDate[timestamp]!.last.itemOrder.add(
                   TimelineItemRef(
                       type: ItemType.note, index: 0)); // Add ref for the note
             }
@@ -231,12 +246,16 @@ class _MainScreenState extends State<MainScreen>
             // Find appropriate entry or create new one
             bool found = false;
             for (var uiEntry in _timelineEntriesByDate[timestamp]!) {
+              // Add task to the list and update itemOrder
+              final newTaskIndex = uiEntry.tasks.length;
               uiEntry.tasks.add(
                 TaskItem(
                   task: entry.content,
                   completed: entry.completed,
                 ),
               );
+              uiEntry.itemOrder.add(
+                  TimelineItemRef(type: ItemType.task, index: newTaskIndex));
               found = true;
               break;
             }
@@ -254,7 +273,7 @@ class _MainScreenState extends State<MainScreen>
                 ],
                 itemOrder: [], // Initialize empty
               ));
-              _timelineEntriesByDate[timestamp]!.first.itemOrder.add(
+              _timelineEntriesByDate[timestamp]!.last.itemOrder.add(
                   TimelineItemRef(
                       type: ItemType.task, index: 0)); // Add ref for the task
             }
@@ -271,132 +290,75 @@ class _MainScreenState extends State<MainScreen>
   }
 
   Future<bool> _checkPermissions() async {
-    // Always check microphone permission
-    final micStatus = await Permission.microphone.status;
+    try {
+      // Always check microphone permission
+      final micStatus = await Permission.microphone.status;
 
-    // For Android 11+, we need MANAGE_EXTERNAL_STORAGE permission
-    // For Android 10 and below, we need regular storage permission
-    bool needsManageStorage = false;
-    bool needsRegularStorage = false;
+      // For Android 11+, we need storage permission with proper handling
+      // For Android 10 and below, we need regular storage permission
+      bool needsRegularStorage = true;
+      bool needsManageStorage =
+          false; // We'll no longer request this due to Play Store restrictions
 
-    if (Platform.isAndroid) {
-      try {
-        // Use device info plugin to get Android version
-        final androidInfo = await _deviceInfoPlugin.androidInfo;
-        final sdkVersion = androidInfo.version.sdkInt;
+      // Consider storage permission granted if regular storage is granted
+      final regularStorageStatus = await Permission.storage.status;
+      final storagePermissionGranted = regularStorageStatus.isGranted;
 
-        needsManageStorage = sdkVersion >= 30; // Android 11+
-        needsRegularStorage = sdkVersion < 30; // Android 10 and below
-      } catch (e) {
-        // If there's an error determining the version, request both permissions
-        // Better to ask for more permissions than to have insufficient access
-        print('Error determining Android version: $e');
-        needsRegularStorage = true;
+      // If already granted, return true immediately
+      if (micStatus.isGranted && storagePermissionGranted) {
+        return true;
       }
-    } else {
-      // For non-Android platforms, use regular storage permission
-      needsRegularStorage = true;
-    }
 
-    // Check storage permissions based on Android version
-    final regularStorageStatus = needsRegularStorage
-        ? await Permission.storage.status
-        : PermissionStatus.granted;
-    final manageStorageStatus = needsManageStorage
-        ? await Permission.manageExternalStorage.status
-        : PermissionStatus.granted;
+      // Build permission message
+      String permissionMessage =
+          'Zelo needs microphone access to record your voice and storage access to save recordings';
 
-    // Consider storage permission granted if either regular storage is granted (Android 10-)
-    // or manage storage is granted (Android 11+)
-    final storagePermissionGranted =
-        (needsRegularStorage && regularStorageStatus.isGranted) ||
-            (needsManageStorage && manageStorageStatus.isGranted);
-
-    // If already granted, return true immediately
-    if (micStatus.isGranted && storagePermissionGranted) {
-      return true;
-    }
-
-    // Build permission message based on Android version
-    String permissionMessage =
-        'Zelo needs microphone access to record your voice';
-    if (needsManageStorage) {
-      permissionMessage += ' and storage access to save recordings';
-    } else if (needsRegularStorage) {
-      permissionMessage += ' and storage access to save recordings';
-    }
-
-    // Show explanation dialog if permissions weren't previously granted
-    if (micStatus.isDenied ||
-        (needsRegularStorage && regularStorageStatus.isDenied) ||
-        (needsManageStorage && manageStorageStatus.isDenied)) {
-      // Show explanation before requesting
-      final bool shouldRequest = await showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (context) => AlertDialog(
-              title: const Text('Permissions Required'),
-              content: Text(
-                  '$permissionMessage. These permissions are necessary for the app to function properly.'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Cancel'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('Continue'),
-                ),
-              ],
-            ),
-          ) ??
-          false;
-
-      if (!shouldRequest) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content:
-                Text('Permissions are required to use the recording feature'),
-            duration: Duration(seconds: 3),
-          ),
-        );
-        return false;
-      }
-    }
-
-    // Handle permanently denied cases first
-    if (micStatus.isPermanentlyDenied ||
-        (needsRegularStorage && regularStorageStatus.isPermanentlyDenied) ||
-        (needsManageStorage && manageStorageStatus.isPermanentlyDenied)) {
-      return _handlePermanentlyDeniedPermissions(
-          needsRegularStorage, needsManageStorage);
-    }
-
-    // Request permissions
-    final newMicStatus = await Permission.microphone.request();
-
-    // Request appropriate storage permissions based on Android version
-    PermissionStatus newRegularStorageStatus = PermissionStatus.granted;
-    PermissionStatus newManageStorageStatus = PermissionStatus.granted;
-
-    if (needsRegularStorage) {
-      newRegularStorageStatus = await Permission.storage.request();
-    }
-
-    if (needsManageStorage) {
-      // For MANAGE_EXTERNAL_STORAGE, we need to send users to settings on Android 11+
-      newManageStorageStatus = await Permission.manageExternalStorage.request();
-
-      // If not granted, try to send user to settings
-      if (!newManageStorageStatus.isGranted) {
-        final shouldOpenSettings = await showDialog<bool>(
+      // Show explanation dialog if permissions weren't previously granted
+      if (micStatus.isDenied || regularStorageStatus.isDenied) {
+        // Show explanation before requesting
+        final bool shouldRequest = await showDialog(
               context: context,
               barrierDismissible: false,
               builder: (context) => AlertDialog(
-                title: const Text('Special Permission Required'),
+                title: const Text('Permissions Required'),
+                content: Text(
+                    '$permissionMessage. These permissions are necessary for the app to function properly.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    child: const Text('Continue'),
+                  ),
+                ],
+              ),
+            ) ??
+            false;
+
+        if (!shouldRequest) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content:
+                  Text('Permissions are required to use the recording feature'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+          return false;
+        }
+      }
+
+      // Handle permanently denied cases with a more user-friendly approach
+      if (micStatus.isPermanentlyDenied ||
+          regularStorageStatus.isPermanentlyDenied) {
+        final bool shouldOpenSettings = await showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => AlertDialog(
+                title: const Text('Permissions Required'),
                 content: const Text(
-                    'For Android 11 and above, Zelo needs special storage permission. '
-                    'Please enable "Allow management of all files" for Zelo in the next screen.'),
+                    'Permissions are required but have been denied. Please open settings to enable them manually.'),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(false),
@@ -413,118 +375,21 @@ class _MainScreenState extends State<MainScreen>
 
         if (shouldOpenSettings) {
           await openAppSettings();
-          // We need to check the permission again after returning from settings
-          newManageStorageStatus =
-              await Permission.manageExternalStorage.status;
         }
-      }
-    }
-
-    // Check for permanently denied after request
-    if (newMicStatus.isPermanentlyDenied ||
-        (needsRegularStorage && newRegularStorageStatus.isPermanentlyDenied) ||
-        (needsManageStorage && newManageStorageStatus.isPermanentlyDenied)) {
-      return _handlePermanentlyDeniedPermissions(
-          needsRegularStorage, needsManageStorage);
-    }
-
-    // Check for regular denied
-    final storagePermissionDenied =
-        (needsRegularStorage && newRegularStorageStatus.isDenied) ||
-            (needsManageStorage && newManageStorageStatus.isDenied);
-
-    if (newMicStatus.isDenied || storagePermissionDenied) {
-      String deniedMessage = 'Microphone';
-      if (storagePermissionDenied) {
-        deniedMessage += ' and storage';
-      }
-      deniedMessage += ' permissions are required to record';
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(deniedMessage),
-          duration: const Duration(seconds: 3),
-        ),
-      );
-      return false;
-    }
-
-    // Storage permission is granted if either regular storage or manage storage is granted
-    final newStoragePermissionGranted =
-        (needsRegularStorage && newRegularStorageStatus.isGranted) ||
-            (needsManageStorage && newManageStorageStatus.isGranted);
-
-    // All permissions granted
-    return newMicStatus.isGranted && newStoragePermissionGranted;
-  }
-
-  Future<bool> _handlePermanentlyDeniedPermissions(
-      bool needsRegularStorage, bool needsManageStorage) async {
-    String permissionMessage = 'Microphone';
-    if (needsRegularStorage || needsManageStorage) {
-      permissionMessage += ' and storage';
-    }
-    permissionMessage += ' permissions are required for this app to work.';
-
-    final result = await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            title: const Text('Permissions Required'),
-            content: Text(
-                '$permissionMessage Please enable them in your device settings.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop(true);
-                },
-                child: const Text('Open Settings'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-
-    if (result) {
-      await openAppSettings();
-      // After returning from settings, check permissions again
-      final micStatus = await Permission.microphone.status;
-
-      // Check appropriate storage permissions based on Android version
-      PermissionStatus regularStorageStatus = PermissionStatus.granted;
-      PermissionStatus manageStorageStatus = PermissionStatus.granted;
-
-      if (needsRegularStorage) {
-        regularStorageStatus = await Permission.storage.status;
-      }
-
-      if (needsManageStorage) {
-        manageStorageStatus = await Permission.manageExternalStorage.status;
-      }
-
-      // Storage permission is granted if either regular storage or manage storage is granted
-      final storagePermissionGranted =
-          (needsRegularStorage && regularStorageStatus.isGranted) ||
-              (needsManageStorage && manageStorageStatus.isGranted);
-
-      if (micStatus.isGranted && storagePermissionGranted) {
-        return true;
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Permissions are still not granted'),
-            duration: Duration(seconds: 3),
-          ),
-        );
         return false;
       }
-    }
 
-    return false;
+      // Request permissions
+      final newMicStatus = await Permission.microphone.request();
+      final newStorageStatus = await Permission.storage.request();
+
+      // Return true if all permissions granted
+      return newMicStatus.isGranted && newStorageStatus.isGranted;
+    } catch (e) {
+      print('Error requesting permissions: $e');
+      // If there's an error, return false but don't crash
+      return false;
+    }
   }
 
   // Add a new recording directly
@@ -706,8 +571,11 @@ class _MainScreenState extends State<MainScreen>
     try {
       final result = await _deepseekService.analyzeTranscription(text);
 
-      // Create a new timeline entry with current timestamp
+      // Always save to the current date (today)
       final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+
+      // Format timestamp for UI display
       final hour = now.hour > 12
           ? now.hour - 12
           : now.hour == 0
@@ -718,60 +586,144 @@ class _MainScreenState extends State<MainScreen>
       final timestamp = '$hour:$minute $ampm';
       final isDaytime = now.hour >= 6 && now.hour < 18;
 
+      // Extract notes and tasks from the LLM result
+      List<String> notes = [];
+      List<TaskItem> tasks = [];
+
+      if (result['notes'] != null && result['notes'].isNotEmpty) {
+        notes = List<String>.from(result['notes']);
+      }
+
+      if (result['tasks'] != null && result['tasks'].isNotEmpty) {
+        final taskStrings = List<String>.from(result['tasks']);
+        tasks = taskStrings
+            .map((taskText) => TaskItem(
+                  task: taskText,
+                  completed: false,
+                ))
+            .toList();
+      }
+
+      // Important: Save ALL entries to persistent storage first
+      List<models.TimelineEntry> createdStorageEntries = [];
+
+      // Save notes to storage with the current timestamp
+      if (result['notes'] != null && result['notes'].isNotEmpty) {
+        for (final note in result['notes']) {
+          final storageEntry = models.TimelineEntry(
+            id: _storageService.generateId(),
+            content: note,
+            timestamp: now, // Use exact now with time
+            type: models.EntryType.note,
+            completed: false,
+          );
+          await _storageService.saveEntry(storageEntry);
+          createdStorageEntries.add(storageEntry);
+        }
+      }
+
+      // Save tasks to storage with the current timestamp
+      if (result['tasks'] != null && result['tasks'].isNotEmpty) {
+        for (final task in result['tasks']) {
+          final storageEntry = models.TimelineEntry(
+            id: _storageService.generateId(),
+            content: task,
+            timestamp: now, // Use exact now with time
+            type: models.EntryType.task,
+            completed: false,
+          );
+          await _storageService.saveEntry(storageEntry);
+          createdStorageEntries.add(storageEntry);
+        }
+      }
+
+      // Check if we're currently viewing today
+      final currentlyViewingToday = _selectedDate.year == today.year &&
+          _selectedDate.month == today.month &&
+          _selectedDate.day == today.day;
+
+      // Update the UI accordingly
       setState(() {
-        // Extract notes and tasks from the LLM result
-        List<String> notes = [];
-        List<TaskItem> tasks = [];
-
-        if (result['notes'] != null && result['notes'].isNotEmpty) {
-          notes = List<String>.from(result['notes']);
-        }
-
-        if (result['tasks'] != null && result['tasks'].isNotEmpty) {
-          final taskStrings = List<String>.from(result['tasks']);
-          tasks = taskStrings
-              .map((taskText) => TaskItem(
-                    task: taskText,
-                    completed: false,
-                  ))
-              .toList();
-        }
-
-        // Create a new timeline entry
-        _timelineEntriesByDate[timestamp] = [
-          TimelineEntry(
-              timestamp: timestamp,
-              isDaytime: isDaytime,
-              notes: notes,
-              tasks: tasks,
-              itemOrder: [] // Initialize and then populate below
+        // Only update the UI immediately if we're viewing today
+        if (currentlyViewingToday) {
+          // Create or update timeline entry for the UI
+          if (!_timelineEntriesByDate.containsKey(timestamp)) {
+            // Create new entry for this timestamp
+            _timelineEntriesByDate[timestamp] = [
+              TimelineEntry(
+                timestamp: timestamp,
+                isDaytime: isDaytime,
+                notes: [],
+                tasks: [],
+                itemOrder: [],
               )
-        ];
-        // Explicitly build itemOrder after notes and tasks are set for the new entry from DeepSeek
-        if (_timelineEntriesByDate[timestamp]!.isNotEmpty) {
-          _timelineEntriesByDate[timestamp]!.first.rebuildItemOrder();
+            ];
+          }
+
+          // Get the first (and usually only) entry for this timestamp
+          final uiEntry = _timelineEntriesByDate[timestamp]!.first;
+
+          // Add notes to UI entry
+          int noteStartIndex = uiEntry.notes.length;
+          for (int i = 0; i < notes.length; i++) {
+            uiEntry.notes.add(notes[i]);
+            uiEntry.itemOrder.add(TimelineItemRef(
+                type: ItemType.note, index: noteStartIndex + i));
+          }
+
+          // Add tasks to UI entry
+          int taskStartIndex = uiEntry.tasks.length;
+          for (int i = 0; i < tasks.length; i++) {
+            uiEntry.tasks.add(tasks[i]);
+            uiEntry.itemOrder.add(TimelineItemRef(
+                type: ItemType.task, index: taskStartIndex + i));
+          }
         }
 
+        // Finish animation sequence
         _isAnalyzing = false;
-
-        // Only now, hide the animations after processing is complete
         _showAnimations = false;
       });
 
-      // Show a snackbar with the results
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Your recording has been processed'),
-          duration: Duration(seconds: 3),
-        ),
-      );
+      // Display appropriate notification
+      if (!currentlyViewingToday) {
+        // Show option to navigate to today if we're on a different date
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Insights saved to today\'s date'),
+            duration: Duration(seconds: 3),
+            action: SnackBarAction(
+              label: 'View Today',
+              onPressed: () {
+                setState(() {
+                  _selectedDate = today;
+                });
+                // Always reload data when changing dates to ensure we have fresh data
+                _loadEntriesForSelectedDate().then((_) {
+                  debugPrint(
+                      "Entries loaded for ${_formatDate(_selectedDate)}");
+                });
+              },
+            ),
+          ),
+        );
+      } else {
+        // Simple confirmation if already on today
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Your recording has been processed'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
     } catch (e) {
       print('Error analyzing with DeepSeek: $e');
       setState(() {
         _isAnalyzing = false;
-        _showAnimations = false; // Hide animations on error
+        _showAnimations = false;
       });
-      // Show error message to user
+
+      // Show error message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error processing recording: ${e.toString()}'),
@@ -930,82 +882,183 @@ class _MainScreenState extends State<MainScreen>
     }
   }
 
-  // Update the WeekdaySelector to reload data when date changes
+  // Update the WeekdaySelector to reload data when date changes and make it horizontally slidable
   Widget _buildWeekdaySelector() {
     final now = DateTime.now();
-    final today = now.weekday; // 1 for Monday, 7 for Sunday
+    final today = DateTime(now.year, now.month, now.day);
 
-    // Calculate the start of the week (Monday)
-    final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
-
-    final weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: List.generate(7, (index) {
-        final dayDate = startOfWeek.add(Duration(days: index));
-        final isSelectedDay = _selectedDate.year == dayDate.year &&
-            _selectedDate.month == dayDate.month &&
-            _selectedDate.day == dayDate.day;
-        final isCurrentDay = now.year == dayDate.year &&
-            now.month == dayDate.month &&
-            now.day == dayDate.day;
-
-        return GestureDetector(
-          onTap: () {
-            setState(() {
-              _selectedDate = dayDate;
-            });
-            _loadEntriesForSelectedDate();
-          },
-          child: Container(
-            width: 40,
-            decoration: BoxDecoration(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(20),
+    // Use a PageView to manage horizontal sliding between weeks
+    return Column(
+      children: [
+        Container(
+          height: 80, // Fixed height for the date selector
+          child: PageView.builder(
+            controller: _pageController,
+            physics: const PageScrollPhysics().applyTo(
+              const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
             ),
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Column(
-              children: [
-                Text(
-                  weekdays[index],
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600, // SemiBold
-                    fontFamily: 'Geist',
-                    color: isSelectedDay
-                        ? const Color(0xFF191919)
-                        : const Color(0xFF9D9D9D),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Container(
-                  width: 30,
-                  height: 30,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: isSelectedDay
-                        ? const Color(0xFFEEEEEE)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: Text(
-                    '${dayDate.day}',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600, // SemiBold
-                      fontFamily: 'GeistMono',
-                      color: isSelectedDay
-                          ? const Color(0xFF191919)
-                          : const Color(0xFF9D9D9D),
+            onPageChanged: (pageIndex) {
+              debugPrint(
+                  "Page changed to: $pageIndex (initial: $_initialPage)");
+
+              // Prevent navigating beyond the current week
+              if (pageIndex <= _initialPage) {
+                // Current week or past weeks - no need to change selection
+                final weekOffset = _initialPage - pageIndex;
+                debugPrint("Week offset: $weekOffset weeks before current");
+
+                // For current week (offset 0) or past weeks (offset > 0)
+                final newStartOfWeek = now.subtract(
+                    Duration(days: now.weekday - 1 + (weekOffset * 7)));
+                debugPrint("Week starting date: ${newStartOfWeek.toString()}");
+
+                // Don't change the selected date when scrolling
+                // Just let the user see the different weeks
+              } else {
+                // Future weeks not allowed
+                debugPrint("Preventing navigation to future week");
+                _pageController.animateToPage(
+                  _initialPage,
+                  duration: Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                );
+              }
+            },
+            itemBuilder: (context, pageIndex) {
+              // Only build pages for current week and past weeks
+              if (pageIndex > _initialPage) {
+                return Container(); // Empty container for future weeks
+              }
+
+              // For current week (offset 0) or past weeks (offset > 0)
+              final weekOffset = _initialPage - pageIndex;
+              final startOfWeek = now
+                  .subtract(Duration(days: now.weekday - 1 + (weekOffset * 7)));
+
+              final weekdays = [
+                'Mon',
+                'Tue',
+                'Wed',
+                'Thu',
+                'Fri',
+                'Sat',
+                'Sun'
+              ];
+
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: List.generate(7, (index) {
+                  final dayDate = startOfWeek.add(Duration(days: index));
+                  final normalizedDayDate =
+                      DateTime(dayDate.year, dayDate.month, dayDate.day);
+
+                  // For debugging
+                  if (index == 0) {
+                    debugPrint(
+                        "First day of week: ${dayDate.toString()} (Page: $pageIndex)");
+                  }
+
+                  final isSelectedDay = _selectedDate.year == dayDate.year &&
+                      _selectedDate.month == dayDate.month &&
+                      _selectedDate.day == dayDate.day;
+
+                  final isCurrentDay = dayDate.year == today.year &&
+                      dayDate.month == today.month &&
+                      dayDate.day == today.day;
+
+                  // Check if date is after today (future date)
+                  final bool isFuture = normalizedDayDate.isAfter(today);
+
+                  // Set text color:
+                  // - Future dates: light grey
+                  // - Today: orange
+                  // - Selected day: dark grey
+                  // - Other dates: medium grey
+                  final Color textColor = isFuture
+                      ? const Color(
+                          0xFFD0D0D0) // Lighter gray for disabled dates
+                      : isCurrentDay
+                          ? const Color(0xFFFD6F00) // Orange for today
+                          : isSelectedDay
+                              ? const Color(0xFF191919)
+                              : const Color(0xFF9D9D9D);
+
+                  // Set background color for selected dates:
+                  // - Light orange for today
+                  // - Light grey for other dates
+                  final Color selectionColor = isCurrentDay
+                      ? const Color(0xFFFFF3E0) // Light orange for today
+                      : const Color(0xFFEEEEEE); // Light grey for other dates
+
+                  return InkWell(
+                    splashColor: Colors.transparent,
+                    highlightColor: Colors.transparent,
+                    onTap: isFuture
+                        ? null
+                        : () {
+                            debugPrint(
+                                "Date tapped: ${dayDate.toString()}, isFuture: $isFuture");
+                            setState(() {
+                              _selectedDate = dayDate;
+                            });
+                            // Always reload data when changing dates to ensure we have fresh data
+                            _loadEntriesForSelectedDate().then((_) {
+                              debugPrint(
+                                  "Entries loaded for ${_formatDate(_selectedDate)}");
+                            });
+                          },
+                    child: Container(
+                      width: 40,
+                      decoration: BoxDecoration(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Column(
+                        children: [
+                          Text(
+                            weekdays[index],
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600, // SemiBold
+                              fontFamily: 'Geist',
+                              color: textColor,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Container(
+                            width: 30,
+                            height: 30,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: isSelectedDay && !isFuture
+                                  ? selectionColor // Use dynamic selection color
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(9),
+                            ),
+                            child: Text(
+                              '${dayDate.day}',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600, // SemiBold
+                                fontFamily: 'GeistMono',
+                                color: textColor,
+                              ),
+                            ),
+                          ),
+                          // Removed the dot for today's date
+                        ],
+                      ),
                     ),
-                  ),
-                ),
-              ],
-            ),
+                  );
+                }),
+              );
+            },
           ),
-        );
-      }),
+        ),
+      ],
     );
   }
 
@@ -1072,10 +1125,10 @@ class _MainScreenState extends State<MainScreen>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // Static "today" text
-                                const Text(
-                                  'today',
-                                  style: TextStyle(
+                                // Dynamic date text based on selected date
+                                Text(
+                                  _formatDate(_selectedDate).toLowerCase(),
+                                  style: const TextStyle(
                                     fontSize: 36,
                                     fontWeight: FontWeight.bold,
                                     fontFamily: 'Geist',

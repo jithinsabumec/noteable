@@ -27,28 +27,65 @@ class StorageService {
 
   // Save a new entry
   Future<void> saveEntry(TimelineEntry entry) async {
-    await _entriesBox.put(entry.id, entry);
+    try {
+      await _entriesBox.put(entry.id, entry);
+      // Verify entry was saved
+      final saved = _entriesBox.get(entry.id);
+      if (saved == null) {
+        print('Warning: Entry with ID ${entry.id} was not saved properly');
+      }
+    } catch (e) {
+      print('Error saving entry: $e');
+      // Attempt to save again with a retry
+      try {
+        await _entriesBox.put(entry.id, entry);
+      } catch (e) {
+        print('Fatal error saving entry: $e');
+        // In a production app, you might want to log this to an error reporting service
+      }
+    }
   }
 
   // Update an existing entry
   Future<void> updateEntry(TimelineEntry entry) async {
-    await _entriesBox.put(entry.id, entry);
+    try {
+      await _entriesBox.put(entry.id, entry);
+    } catch (e) {
+      print('Error updating entry: $e');
+      // Attempt to update again with a retry
+      try {
+        await _entriesBox.put(entry.id, entry);
+      } catch (e) {
+        print('Fatal error updating entry: $e');
+      }
+    }
   }
 
   // Delete an entry
   Future<void> deleteEntry(String id) async {
-    await _entriesBox.delete(id);
+    try {
+      await _entriesBox.delete(id);
+    } catch (e) {
+      print('Error deleting entry: $e');
+    }
   }
 
   // Get all entries for a specific date
   List<TimelineEntry> getEntriesForDate(DateTime date) {
-    final startOfDay = DateTime(date.year, date.month, date.day);
-    final endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
+    try {
+      final startOfDay = DateTime(date.year, date.month, date.day);
+      final endOfDay =
+          DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
 
-    return _entriesBox.values.where((entry) {
-      return entry.timestamp.isAfter(startOfDay) &&
-          entry.timestamp.isBefore(endOfDay);
-    }).toList();
+      return _entriesBox.values.where((entry) {
+        final entryDate = DateTime(
+            entry.timestamp.year, entry.timestamp.month, entry.timestamp.day);
+        return entryDate.isAtSameMomentAs(startOfDay);
+      }).toList();
+    } catch (e) {
+      print('Error retrieving entries for date: $e');
+      return [];
+    }
   }
 
   // Get all notes for a specific date

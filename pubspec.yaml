@@ -1,4 +1,4 @@
-name: zelo
+name: noteable
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -58,6 +58,7 @@ dev_dependencies:
   flutter_lints: ^3.0.0
   hive_generator: ^2.0.1
   build_runner: ^2.4.8
+  flutter_launcher_icons: ^0.14.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -125,3 +126,12 @@ flutter:
   assets:
     - assets/icons/
     - assets/animations/
+
+# Flutter launcher icons configuration
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/logo.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/icons/logo.png"
+  remove_alpha_ios: true
