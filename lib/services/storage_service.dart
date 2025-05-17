@@ -80,7 +80,9 @@ class StorageService {
       return _entriesBox.values.where((entry) {
         final entryDate = DateTime(
             entry.timestamp.year, entry.timestamp.month, entry.timestamp.day);
-        return entryDate.isAtSameMomentAs(startOfDay);
+        return entryDate.year == startOfDay.year &&
+            entryDate.month == startOfDay.month &&
+            entryDate.day == startOfDay.day;
       }).toList();
     } catch (e) {
       print('Error retrieving entries for date: $e');

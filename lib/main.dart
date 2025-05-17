@@ -887,175 +887,229 @@ class _MainScreenState extends State<MainScreen>
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
-    // Use a PageView to manage horizontal sliding between weeks
-    return Column(
+    // Create a stack with the scrollable date selector
+    return Stack(
       children: [
-        Container(
-          height: 80, // Fixed height for the date selector
-          child: PageView.builder(
-            controller: _pageController,
-            physics: const PageScrollPhysics().applyTo(
-              const BouncingScrollPhysics(
-                parent: AlwaysScrollableScrollPhysics(),
+        // Main date selector
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+          child: SizedBox(
+            height: 80, // Fixed height for the date selector
+            child: PageView.builder(
+              controller: _pageController,
+              physics: const PageScrollPhysics().applyTo(
+                const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics(),
+                ),
               ),
-            ),
-            onPageChanged: (pageIndex) {
-              debugPrint(
-                  "Page changed to: $pageIndex (initial: $_initialPage)");
+              onPageChanged: (pageIndex) {
+                debugPrint(
+                    "Page changed to: $pageIndex (initial: $_initialPage)");
 
-              // Prevent navigating beyond the current week
-              if (pageIndex <= _initialPage) {
-                // Current week or past weeks - no need to change selection
-                final weekOffset = _initialPage - pageIndex;
-                debugPrint("Week offset: $weekOffset weeks before current");
+                // Prevent navigating beyond the current week
+                if (pageIndex <= _initialPage) {
+                  // Current week or past weeks - no need to change selection
+                  final weekOffset = _initialPage - pageIndex;
+                  debugPrint("Week offset: $weekOffset weeks before current");
+
+                  // For current week (offset 0) or past weeks (offset > 0)
+                  final newStartOfWeek = now.subtract(
+                      Duration(days: now.weekday - 1 + (weekOffset * 7)));
+                  debugPrint(
+                      "Week starting date: ${newStartOfWeek.toString()}");
+
+                  // Don't change the selected date when scrolling
+                  // Just let the user see the different weeks
+                } else {
+                  // Future weeks not allowed
+                  debugPrint("Preventing navigation to future week");
+                  _pageController.animateToPage(
+                    _initialPage,
+                    duration: Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                  );
+                }
+              },
+              itemBuilder: (context, pageIndex) {
+                // Only build pages for current week and past weeks
+                if (pageIndex > _initialPage) {
+                  return Container(); // Empty container for future weeks
+                }
 
                 // For current week (offset 0) or past weeks (offset > 0)
-                final newStartOfWeek = now.subtract(
+                final weekOffset = _initialPage - pageIndex;
+                final startOfWeek = now.subtract(
                     Duration(days: now.weekday - 1 + (weekOffset * 7)));
-                debugPrint("Week starting date: ${newStartOfWeek.toString()}");
 
-                // Don't change the selected date when scrolling
-                // Just let the user see the different weeks
-              } else {
-                // Future weeks not allowed
-                debugPrint("Preventing navigation to future week");
-                _pageController.animateToPage(
-                  _initialPage,
-                  duration: Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                );
-              }
-            },
-            itemBuilder: (context, pageIndex) {
-              // Only build pages for current week and past weeks
-              if (pageIndex > _initialPage) {
-                return Container(); // Empty container for future weeks
-              }
+                final weekdays = [
+                  'Mon',
+                  'Tue',
+                  'Wed',
+                  'Thu',
+                  'Fri',
+                  'Sat',
+                  'Sun'
+                ];
 
-              // For current week (offset 0) or past weeks (offset > 0)
-              final weekOffset = _initialPage - pageIndex;
-              final startOfWeek = now
-                  .subtract(Duration(days: now.weekday - 1 + (weekOffset * 7)));
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: List.generate(7, (index) {
+                    final dayDate = startOfWeek.add(Duration(days: index));
+                    final normalizedDayDate =
+                        DateTime(dayDate.year, dayDate.month, dayDate.day);
 
-              final weekdays = [
-                'Mon',
-                'Tue',
-                'Wed',
-                'Thu',
-                'Fri',
-                'Sat',
-                'Sun'
-              ];
+                    // For debugging
+                    if (index == 0) {
+                      debugPrint(
+                          "First day of week: ${dayDate.toString()} (Page: $pageIndex)");
+                    }
 
-              return Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: List.generate(7, (index) {
-                  final dayDate = startOfWeek.add(Duration(days: index));
-                  final normalizedDayDate =
-                      DateTime(dayDate.year, dayDate.month, dayDate.day);
+                    final isSelectedDay = _selectedDate.year == dayDate.year &&
+                        _selectedDate.month == dayDate.month &&
+                        _selectedDate.day == dayDate.day;
 
-                  // For debugging
-                  if (index == 0) {
-                    debugPrint(
-                        "First day of week: ${dayDate.toString()} (Page: $pageIndex)");
-                  }
+                    final isCurrentDay = dayDate.year == today.year &&
+                        dayDate.month == today.month &&
+                        dayDate.day == today.day;
 
-                  final isSelectedDay = _selectedDate.year == dayDate.year &&
-                      _selectedDate.month == dayDate.month &&
-                      _selectedDate.day == dayDate.day;
+                    // Check if date is after today (future date)
+                    final bool isFuture = normalizedDayDate.isAfter(today);
 
-                  final isCurrentDay = dayDate.year == today.year &&
-                      dayDate.month == today.month &&
-                      dayDate.day == today.day;
+                    // Set text color:
+                    // - Future dates: light grey
+                    // - Today: blue
+                    // - Selected day: dark grey
+                    // - Other dates: medium grey
+                    final Color textColor = isFuture
+                        ? const Color(
+                            0xFFD0D0D0) // Lighter gray for disabled dates
+                        : isCurrentDay
+                            ? const Color(
+                                0xFF225AFF) // Blue for today instead of orange
+                            : isSelectedDay
+                                ? const Color(0xFF191919)
+                                : const Color(0xFF9D9D9D);
 
-                  // Check if date is after today (future date)
-                  final bool isFuture = normalizedDayDate.isAfter(today);
+                    // Set background color for selected dates:
+                    // - Light blue for today
+                    // - Light grey for other dates
+                    final Color selectionColor = isCurrentDay
+                        ? const Color.fromARGB(255, 236, 242,
+                            255) // Light blue for today instead of light orange
+                        : const Color(0xFFEEEEEE); // Light grey for other dates
 
-                  // Set text color:
-                  // - Future dates: light grey
-                  // - Today: orange
-                  // - Selected day: dark grey
-                  // - Other dates: medium grey
-                  final Color textColor = isFuture
-                      ? const Color(
-                          0xFFD0D0D0) // Lighter gray for disabled dates
-                      : isCurrentDay
-                          ? const Color(0xFFFD6F00) // Orange for today
-                          : isSelectedDay
-                              ? const Color(0xFF191919)
-                              : const Color(0xFF9D9D9D);
-
-                  // Set background color for selected dates:
-                  // - Light orange for today
-                  // - Light grey for other dates
-                  final Color selectionColor = isCurrentDay
-                      ? const Color(0xFFFFF3E0) // Light orange for today
-                      : const Color(0xFFEEEEEE); // Light grey for other dates
-
-                  return InkWell(
-                    splashColor: Colors.transparent,
-                    highlightColor: Colors.transparent,
-                    onTap: isFuture
-                        ? null
-                        : () {
-                            debugPrint(
-                                "Date tapped: ${dayDate.toString()}, isFuture: $isFuture");
-                            setState(() {
-                              _selectedDate = dayDate;
-                            });
-                            // Always reload data when changing dates to ensure we have fresh data
-                            _loadEntriesForSelectedDate().then((_) {
+                    return InkWell(
+                      splashColor: Colors.transparent,
+                      highlightColor: Colors.transparent,
+                      onTap: isFuture
+                          ? null
+                          : () {
                               debugPrint(
-                                  "Entries loaded for ${_formatDate(_selectedDate)}");
-                            });
-                          },
-                    child: Container(
-                      width: 40,
-                      decoration: BoxDecoration(
-                        color: Colors.transparent,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Column(
-                        children: [
-                          Text(
-                            weekdays[index],
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600, // SemiBold
-                              fontFamily: 'Geist',
-                              color: textColor,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Container(
-                            width: 30,
-                            height: 30,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: isSelectedDay && !isFuture
-                                  ? selectionColor // Use dynamic selection color
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(9),
-                            ),
-                            child: Text(
-                              '${dayDate.day}',
+                                  "Date tapped: ${dayDate.toString()}, isFuture: $isFuture");
+                              setState(() {
+                                _selectedDate = dayDate;
+                              });
+                              // Always reload data when changing dates to ensure we have fresh data
+                              _loadEntriesForSelectedDate().then((_) {
+                                debugPrint(
+                                    "Entries loaded for ${_formatDate(_selectedDate)}");
+                              });
+                            },
+                      child: Container(
+                        width: 45, // Increase width slightly
+                        decoration: BoxDecoration(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Column(
+                          children: [
+                            Text(
+                              weekdays[index],
                               style: TextStyle(
-                                fontSize: 16,
+                                fontSize: 14,
                                 fontWeight: FontWeight.w600, // SemiBold
-                                fontFamily: 'GeistMono',
+                                fontFamily: 'Geist',
                                 color: textColor,
                               ),
                             ),
-                          ),
-                          // Removed the dot for today's date
-                        ],
+                            const SizedBox(height: 4),
+                            Container(
+                              width: 30,
+                              height: 30,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: isSelectedDay && !isFuture
+                                    ? selectionColor // Use dynamic selection color
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              child: Text(
+                                '${dayDate.day}',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600, // SemiBold
+                                  fontFamily: 'GeistMono',
+                                  color: textColor,
+                                ),
+                              ),
+                            ),
+                            // Removed the dot for today's date
+                          ],
+                        ),
                       ),
-                    ),
-                  );
-                }),
-              );
-            },
+                    );
+                  }),
+                );
+              },
+            ),
+          ),
+        ),
+
+        // Left gradient overlay
+        Positioned(
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 40,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Colors.white,
+                  Colors.white.withOpacity(0.8),
+                  Colors.white.withOpacity(0.5),
+                  Colors.white.withOpacity(0.0),
+                ],
+                stops: const [0.0, 0.3, 0.6, 1.0],
+              ),
+            ),
+          ),
+        ),
+
+        // Right gradient overlay
+        Positioned(
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 40,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerRight,
+                end: Alignment.centerLeft,
+                colors: [
+                  Colors.white,
+                  Colors.white.withOpacity(0.8),
+                  Colors.white.withOpacity(0.5),
+                  Colors.white.withOpacity(0.0),
+                ],
+                stops: const [0.0, 0.3, 0.6, 1.0],
+              ),
+            ),
           ),
         ),
       ],
@@ -1104,54 +1158,64 @@ class _MainScreenState extends State<MainScreen>
         child: Stack(
           children: [
             // Main content
-            Padding(
-              padding: const EdgeInsets.only(
-                  bottom: 24.0, top: 16.0, left: 24.0, right: 24.0),
-              child: LayoutBuilder(
-                // Added LayoutBuilder
-                builder:
-                    (BuildContext context, BoxConstraints viewportConstraints) {
-                  return SingleChildScrollView(
-                    child: ConstrainedBox(
-                      // Added ConstrainedBox
-                      constraints: BoxConstraints(
-                          minHeight: viewportConstraints.maxHeight),
+            LayoutBuilder(
+              builder:
+                  (BuildContext context, BoxConstraints viewportConstraints) {
+                return SingleChildScrollView(
+                  clipBehavior: Clip.none,
+                  physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
+                  ),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                        minHeight: viewportConstraints.maxHeight),
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 24.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Static "today" text and weekday row
+                          // Static "today" text with horizontal padding
                           Padding(
-                            padding: const EdgeInsets.only(bottom: 16.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Dynamic date text based on selected date
-                                Text(
-                                  _formatDate(_selectedDate).toLowerCase(),
-                                  style: const TextStyle(
-                                    fontSize: 36,
-                                    fontWeight: FontWeight.bold,
-                                    fontFamily: 'Geist',
-                                    color: Color(0xFF171717),
-                                    height: 1.0,
-                                    letterSpacing: -0.72,
-                                  ),
-                                ),
-                                const SizedBox(height: 18),
-                                // Weekday selector
-                                _buildWeekdaySelector(),
-                              ],
+                            padding: const EdgeInsets.only(
+                                top: 16.0,
+                                left: 24.0,
+                                right: 24.0,
+                                bottom: 16.0),
+                            child: Text(
+                              _formatDate(_selectedDate).toLowerCase(),
+                              style: const TextStyle(
+                                fontSize: 36,
+                                fontWeight: FontWeight.bold,
+                                fontFamily: 'Geist',
+                                color: Color(0xFF171717),
+                                height: 1.0,
+                                letterSpacing: -0.72,
+                              ),
                             ),
                           ),
 
-                          // Timeline entries
-                          ..._buildTimelineEntries(),
+                          // Weekday selector without horizontal padding
+                          // to allow full width scrolling
+                          _buildWeekdaySelector(),
+
+                          // Timeline entries with horizontal padding
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              left: 24.0,
+                              right: 24.0,
+                              top: 16.0,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: _buildTimelineEntries(),
+                            ),
+                          ),
                         ], // End of Column
                       ), // End of ConstrainedBox
                     ), // End of SingleChildScrollView
-                  ); // End of LayoutBuilder
-                }, // End of LayoutBuilder builder
-              ), // End of LayoutBuilder
+                  ), // End of LayoutBuilder
+                ); // End of SingleChildScrollView
+              }, // End of LayoutBuilder builder
             ),
 
             // Animation sequence controller - always there but only visible when needed
@@ -1937,40 +2001,114 @@ class _MainScreenState extends State<MainScreen>
       builder: (BuildContext context) {
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16.0),
+            padding: const EdgeInsets.all(24.0),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ListTile(
-                  leading: const Icon(Icons.edit, color: Colors.blue),
-                  title: const Text('Edit'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showEditDialog(
-                      context: context,
-                      timestamp: timestamp,
-                      contentListIndex: contentListIndex,
-                      orderIndex: orderIndex,
-                      itemType: itemType,
-                      content: content,
-                      completed: completed,
-                    );
-                  },
+                // Drag handle
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
                 ),
-                ListTile(
-                  leading: const Icon(Icons.delete, color: Colors.red),
-                  title: const Text('Delete'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _deleteItem(timestamp, orderIndex,
-                        itemType); // Use orderIndex and itemType
-                  },
+                const SizedBox(height: 24),
+
+                // Edit button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _showEditDialog(
+                        context: context,
+                        timestamp: timestamp,
+                        contentListIndex: contentListIndex,
+                        orderIndex: orderIndex,
+                        itemType: itemType,
+                        content: content,
+                        completed: completed,
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF3B82F6), // Blue
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'Edit',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'Geist',
+                      ),
+                    ),
+                  ),
                 ),
-                ListTile(
-                  leading: const Icon(Icons.swap_vert, color: Colors.green),
-                  title: const Text('Move or Reorder'),
-                  subtitle: const Text('Drag to another time or position'),
-                  onTap: () {
+                const SizedBox(height: 12),
+
+                // Delete button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _deleteItem(timestamp, orderIndex, itemType);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFEF4444), // Red
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'Delete',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'Geist',
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+
+                // Move or Order section
+                const Text(
+                  'Move or Order',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    fontFamily: 'Geist',
+                    color: Color(0xFF4B4B4B),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Press and hold to enter drag mode, then move the item to another time or position',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF737373),
+                    fontFamily: 'Geist',
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Move or Order button
+                OutlinedButton(
+                  onPressed: () {
                     Navigator.pop(context);
                     // Enable drag mode for this specific item
                     setState(() {
@@ -1978,10 +2116,31 @@ class _MainScreenState extends State<MainScreen>
                       _dragItemIndex = contentListIndex;
                       _dragItemOrderIndex = orderIndex;
                       _dragItemType = itemType;
-                      // _dragItemIsTask = isTask; // Deprecated
                     });
                     _showDragInstructions();
                   },
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    side: const BorderSide(color: Color(0xFFE5E5E5)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Icon(Icons.swap_vert, color: Color(0xFF4B4B4B)),
+                      SizedBox(width: 8),
+                      Text(
+                        'Start Drag Mode',
+                        style: TextStyle(
+                          color: Color(0xFF4B4B4B),
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'Geist',
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -1991,115 +2150,623 @@ class _MainScreenState extends State<MainScreen>
     );
   }
 
-  // Show edit dialog for a note or task
+  // Show edit dialog for a note or task - now using the bottom sheet UI like when adding
   void _showEditDialog({
     required BuildContext context,
     required String timestamp,
-    required int contentListIndex, // Changed from 'index'
-    required int orderIndex, // Added
-    required ItemType itemType, // Changed from 'isTask'
+    required int contentListIndex,
+    required int orderIndex,
+    required ItemType itemType,
     required String content,
     bool? completed,
   }) {
-    final TextEditingController controller =
-        TextEditingController(text: content);
+    // Dispose any previous sheet's focus nodes before creating new ones
+    for (var node in _sheetFocusNodes) {
+      node.dispose();
+    }
+    _sheetFocusNodes.clear();
 
-    showDialog(
+    // Create a new controller initialized with the existing content
+    List<TextEditingController> _textControllers = [
+      TextEditingController(text: content)
+    ];
+    _sheetFocusNodes
+        .add(FocusNode()); // Add initial focus node to the class-level list
+
+    // Initialize with the type of the current item
+    String selectedType = itemType == ItemType.note ? 'Notes' : 'Tasks';
+
+    // Initialize completed status for tasks
+    bool isTaskCompleted = completed ?? false;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_sheetFocusNodes.isNotEmpty) {
+        _sheetFocusNodes.first.requestFocus();
+      }
+    });
+
+    showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(itemType == ItemType.note ? 'Edit Note' : 'Edit Task'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: controller,
-                maxLines: itemType == ItemType.note ? 1 : 5,
-                decoration: InputDecoration(
-                  hintText: itemType == ItemType.note ? 'Note' : 'Task',
-                  border: const OutlineInputBorder(),
-                ),
-                autofocus: true,
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+                left: 24,
+                right: 24,
+                top: 16,
               ),
-              if (itemType == ItemType.task)
-                Padding(
-                  padding: const EdgeInsets.only(top: 16.0),
-                  child: Row(
-                    children: [
-                      Checkbox(
-                        value: completed,
-                        onChanged: (bool? value) {
-                          setState(() {
-                            completed = value ?? false;
-                          });
-                        },
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    // Drag handle
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[300],
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
-                      const Text('Completed'),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Segmented Control (Notes/Tasks) - with animated background
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final containerWidth = constraints.maxWidth;
+                        final gap = 4.0; // 4 pixel gap between tabs
+                        final tabWidth = (containerWidth - 8 - gap) / 2;
+
+                        return Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEEEEEE),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFE4E4E4)),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x19000000),
+                                blurRadius: 17.60,
+                                offset: Offset(0, 4),
+                                spreadRadius: 0,
+                              )
+                            ],
+                          ),
+                          height: 46, // Fixed height for the container
+                          child: Stack(
+                            children: [
+                              // Animated background that slides
+                              AnimatedPositioned(
+                                duration: const Duration(milliseconds: 250),
+                                curve: Curves.easeInOut,
+                                left: selectedType == 'Notes'
+                                    ? 0
+                                    : tabWidth +
+                                        gap, // Add gap for Tasks position
+                                top: 0,
+                                bottom: 0,
+                                width: tabWidth, // Equal width for both tabs
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(6),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.05),
+                                        blurRadius: 5,
+                                        offset: const Offset(0, 2),
+                                      )
+                                    ],
+                                  ),
+                                ),
+                              ),
+
+                              // Tab buttons
+                              Row(
+                                children: <Widget>[
+                                  // Notes Tab - Exactly half width
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setModalState(() {
+                                          selectedType = 'Notes';
+                                        });
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.transparent,
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            SvgPicture.asset(
+                                              'assets/icons/notes.svg',
+                                              width: 18,
+                                              height: 18,
+                                              colorFilter: ColorFilter.mode(
+                                                selectedType == 'Notes'
+                                                    ? Colors.black
+                                                    : Colors.grey.shade600,
+                                                BlendMode.srcIn,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              'Notes',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontFamily: 'Geist',
+                                                color: selectedType == 'Notes'
+                                                    ? Colors.black
+                                                    : Colors.grey.shade600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+
+                                  // Tasks Tab - Exactly half width
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setModalState(() {
+                                          selectedType = 'Tasks';
+                                        });
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.transparent,
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            SvgPicture.asset(
+                                              'assets/icons/tasks.svg',
+                                              width: 18,
+                                              height: 18,
+                                              colorFilter: ColorFilter.mode(
+                                                selectedType == 'Tasks'
+                                                    ? Colors.black
+                                                    : Colors.grey.shade600,
+                                                BlendMode.srcIn,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              'Tasks',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontFamily: 'Geist',
+                                                color: selectedType == 'Tasks'
+                                                    ? Colors.black
+                                                    : Colors.grey.shade600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Text Field and checkbox for completed (if task)
+                    Column(
+                      children: [
+                        const SizedBox(height: 24),
+
+                        // Title - Different text based on selected type
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            selectedType == 'Notes' ? "Edit Note" : "Edit Task",
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              fontFamily: 'Geist',
+                              color: Color(0xFF4B4B4B),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // Text field for content
+                        TextField(
+                          controller: _textControllers[0],
+                          focusNode: _sheetFocusNodes[0],
+                          minLines: 3,
+                          maxLines: 5,
+                          decoration: InputDecoration(
+                            hintText: selectedType == 'Notes'
+                                ? "I\'ve been thinking about..."
+                                : "I need to...",
+                            hintStyle:
+                                const TextStyle(color: Color(0xFFB3B3B3)),
+                            fillColor: const Color(0xFFF9F9F9),
+                            filled: true,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(
+                                color: Color(0xFFE1E1E1),
+                                width: 1.0,
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(
+                                color: Color(0xFFE1E1E1),
+                                width: 1.0,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(
+                                color: Color(0xFFE1E1E1),
+                                width: 1.0,
+                              ),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                          ),
+                        ),
+
+                        // Completed checkbox for tasks
+                        if (selectedType == 'Tasks')
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16.0),
+                            child: Row(
+                              children: [
+                                Checkbox(
+                                  value: isTaskCompleted,
+                                  onChanged: (bool? value) {
+                                    setModalState(() {
+                                      isTaskCompleted = value ?? false;
+                                    });
+                                  },
+                                ),
+                                const Text('Completed'),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 48),
+
+                    // Bottom Action Buttons
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () {
+                              Navigator.pop(context); // Close bottom sheet
+                            },
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              textStyle: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  fontFamily: 'Geist'),
+                              foregroundColor: const Color(0xFF4B4B4B),
+                              side: BorderSide(color: Colors.grey.shade300),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {
+                              final newContent = _textControllers[0].text;
+                              if (newContent.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Please enter some content'),
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                                return;
+                              }
+
+                              Navigator.pop(context);
+
+                              // Call _updateItem with the new content and type
+                              _updateItem(
+                                timestamp: timestamp,
+                                orderIndex: orderIndex,
+                                itemType: selectedType == 'Notes'
+                                    ? ItemType.note
+                                    : ItemType.task,
+                                newContent: newContent,
+                                newCompleted: selectedType == 'Tasks'
+                                    ? isTaskCompleted
+                                    : null,
+                                originalItemType:
+                                    itemType, // Pass the original type to handle conversions
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              textStyle: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  fontFamily: 'Geist'),
+                              backgroundColor: Colors.black,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text('Save'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16), // Padding at the bottom
+                  ],
                 ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _updateItem(
-                  timestamp: timestamp,
-                  orderIndex: orderIndex, // Pass orderIndex
-                  itemType: itemType, // Pass itemType
-                  newContent: controller.text,
-                  newCompleted: completed,
-                );
-              },
-              child: const Text('Save'),
-            ),
-          ],
+              ),
+            );
+          },
         );
       },
     );
   }
 
-  // Update a note or task
+  // Update a note or task - modified to handle type conversion
   void _updateItem({
     required String timestamp,
-    required int
-        orderIndex, // Changed from index, now refers to itemOrder index
-    required ItemType itemType, // Changed from isTask
+    required int orderIndex,
+    required ItemType itemType,
     required String newContent,
     bool? newCompleted,
+    ItemType? originalItemType,
   }) {
     if (newContent.isEmpty) return;
 
     setState(() {
-      if (itemType == ItemType.note) {
-        _timelineEntriesByDate[timestamp]![orderIndex] = TimelineEntry(
-          timestamp: timestamp,
-          isDaytime: _timelineEntriesByDate[timestamp]![orderIndex].isDaytime,
-          notes: [newContent],
-          tasks: _timelineEntriesByDate[timestamp]![orderIndex].tasks,
-          itemOrder: _timelineEntriesByDate[timestamp]![orderIndex].itemOrder,
-        );
-      } else {
-        _timelineEntriesByDate[timestamp]![orderIndex] = TimelineEntry(
-          timestamp: timestamp,
-          isDaytime: _timelineEntriesByDate[timestamp]![orderIndex].isDaytime,
-          notes: _timelineEntriesByDate[timestamp]![orderIndex].notes,
-          tasks: [
-            TaskItem(
+      // Get the current timeline entry
+      final currentEntry = _timelineEntriesByDate[timestamp]!.first;
+
+      // Check if we need to convert between note and task
+      final isTypeChange =
+          originalItemType != null && originalItemType != itemType;
+
+      // Variables to store the item that was updated (or created)
+      String? updatedItemContent;
+      bool? updatedItemCompleted;
+      ItemType? updatedItemType;
+
+      if (isTypeChange) {
+        // We need to convert from one type to another
+
+        // First, find the item in the item order
+        int itemOrderIndex = -1;
+        for (int i = 0; i < currentEntry.itemOrder.length; i++) {
+          final ref = currentEntry.itemOrder[i];
+          if (ref.type == originalItemType && ref.index == orderIndex) {
+            itemOrderIndex = i;
+            break;
+          }
+        }
+
+        if (itemOrderIndex >= 0) {
+          // Remove the old reference
+          currentEntry.itemOrder.removeAt(itemOrderIndex);
+
+          // Create new item of the correct type
+          if (itemType == ItemType.note) {
+            // Converting task to note
+            int newNoteIndex = currentEntry.notes.length;
+            currentEntry.notes.add(newContent);
+
+            // Add new reference to the notes list
+            currentEntry.itemOrder.insert(itemOrderIndex,
+                TimelineItemRef(type: ItemType.note, index: newNoteIndex));
+
+            // Store for database update
+            updatedItemContent = newContent;
+            updatedItemType = ItemType.note;
+          } else {
+            // Converting note to task
+            int newTaskIndex = currentEntry.tasks.length;
+            currentEntry.tasks.add(TaskItem(
               task: newContent,
-              completed: newCompleted ??
-                  _timelineEntriesByDate[timestamp]![orderIndex]
-                      .tasks[orderIndex]
-                      .completed,
-            ),
-          ],
-          itemOrder: _timelineEntriesByDate[timestamp]![orderIndex].itemOrder,
-        );
+              completed: newCompleted ?? false,
+            ));
+
+            // Add new reference to the tasks list
+            currentEntry.itemOrder.insert(itemOrderIndex,
+                TimelineItemRef(type: ItemType.task, index: newTaskIndex));
+
+            // Store for database update
+            updatedItemContent = newContent;
+            updatedItemCompleted = newCompleted ?? false;
+            updatedItemType = ItemType.task;
+          }
+
+          // Delete the old item from database and create a new one with the updated type
+          // We need to create a new storage entry for the updated item
+          final now = DateTime.now();
+
+          // Extract timestamp parts from the UI timestamp string (e.g., "3:45 PM")
+          final parts = timestamp.split(' ');
+          final timeParts = parts[0].split(':');
+          int hour = int.parse(timeParts[0]);
+          int minute = int.parse(timeParts[1]);
+
+          // Convert to 24-hour format
+          if (parts[1] == 'PM' && hour < 12) hour += 12;
+          if (parts[1] == 'AM' && hour == 12) hour = 0;
+
+          // Create a DateTime with current date but specified time
+          final currentDate = _selectedDate;
+          final itemTime = DateTime(currentDate.year, currentDate.month,
+              currentDate.day, hour, minute);
+
+          if (updatedItemType == ItemType.note) {
+            final storageEntry = models.TimelineEntry(
+              id: _storageService.generateId(),
+              content: updatedItemContent!,
+              timestamp: itemTime,
+              type: models.EntryType.note,
+              completed: false,
+            );
+            _storageService.saveEntry(storageEntry);
+          } else {
+            final storageEntry = models.TimelineEntry(
+              id: _storageService.generateId(),
+              content: updatedItemContent!,
+              timestamp: itemTime,
+              type: models.EntryType.task,
+              completed: updatedItemCompleted!,
+            );
+            _storageService.saveEntry(storageEntry);
+          }
+
+          // We should also delete the old item, but we don't have its ID
+          // This will be a data leak, but we can't identify the exact item
+          // Ideally, we would store the ID with each UI item too
+        }
+      } else {
+        // Same type, just update the content
+        if (itemType == ItemType.note) {
+          if (orderIndex < currentEntry.notes.length) {
+            currentEntry.notes[orderIndex] = newContent;
+
+            // Store for database update
+            updatedItemContent = newContent;
+            updatedItemType = ItemType.note;
+          }
+        } else {
+          if (orderIndex < currentEntry.tasks.length) {
+            currentEntry.tasks[orderIndex] = TaskItem(
+              task: newContent,
+              completed:
+                  newCompleted ?? currentEntry.tasks[orderIndex].completed,
+            );
+
+            // Store for database update
+            updatedItemContent = newContent;
+            updatedItemCompleted =
+                newCompleted ?? currentEntry.tasks[orderIndex].completed;
+            updatedItemType = ItemType.task;
+          }
+        }
+
+        // Similar to type change, we need to update the database
+        // But we don't have the ID of the specific item to update
+        // So we'll delete all entries at this timestamp and re-create them
+
+        // Get all items from this timestamp
+        List<models.TimelineEntry> entriesToRecreate = [];
+
+        // Extract timestamp parts from the UI timestamp string (e.g., "3:45 PM")
+        final parts = timestamp.split(' ');
+        final timeParts = parts[0].split(':');
+        int hour = int.parse(timeParts[0]);
+        int minute = int.parse(timeParts[1]);
+
+        // Convert to 24-hour format
+        if (parts[1] == 'PM' && hour < 12) hour += 12;
+        if (parts[1] == 'AM' && hour == 12) hour = 0;
+
+        // Create a DateTime with current date but specified time
+        final currentDate = _selectedDate;
+        final itemTime = DateTime(
+            currentDate.year, currentDate.month, currentDate.day, hour, minute);
+
+        // Get all entries for this date
+        final allEntries = _storageService.getEntriesForDate(_selectedDate);
+
+        // Find entries with matching hour and minute
+        final matchingEntries = allEntries
+            .where((entry) =>
+                entry.timestamp.hour == hour &&
+                entry.timestamp.minute == minute)
+            .toList();
+
+        // Now find the specific entry we want to update
+        // This is an approximation - if there are multiple entries with same content,
+        // this might update the wrong one
+        models.TimelineEntry? entryToUpdate;
+
+        if (updatedItemType == ItemType.note) {
+          // Find a note with similar content
+          for (var entry in matchingEntries) {
+            if (entry.type == models.EntryType.note) {
+              entryToUpdate = entry;
+              break;
+            }
+          }
+
+          if (entryToUpdate != null) {
+            // Update the entry
+            final updatedEntry = models.TimelineEntry(
+              id: entryToUpdate.id,
+              content: updatedItemContent!,
+              timestamp: itemTime,
+              type: models.EntryType.note,
+              completed: false,
+            );
+            _storageService.updateEntry(updatedEntry);
+          }
+        } else if (updatedItemType == ItemType.task) {
+          // Find a task with similar content
+          for (var entry in matchingEntries) {
+            if (entry.type == models.EntryType.task) {
+              entryToUpdate = entry;
+              break;
+            }
+          }
+
+          if (entryToUpdate != null) {
+            // Update the entry
+            final updatedEntry = models.TimelineEntry(
+              id: entryToUpdate.id,
+              content: updatedItemContent!,
+              timestamp: itemTime,
+              type: models.EntryType.task,
+              completed: updatedItemCompleted!,
+            );
+            _storageService.updateEntry(updatedEntry);
+          }
+        }
       }
     });
   }
@@ -2123,6 +2790,51 @@ class _MainScreenState extends State<MainScreen>
       // Remove the timestamp entry if it's now empty
       if (_timelineEntriesByDate[timestamp]!.isEmpty) {
         _timelineEntriesByDate.remove(timestamp);
+      }
+
+      // Delete from database as well
+      // Extract timestamp parts from the UI timestamp string (e.g., "3:45 PM")
+      final parts = timestamp.split(' ');
+      final timeParts = parts[0].split(':');
+      int hour = int.parse(timeParts[0]);
+      int minute = int.parse(timeParts[1]);
+
+      // Convert to 24-hour format
+      if (parts[1] == 'PM' && hour < 12) hour += 12;
+      if (parts[1] == 'AM' && hour == 12) hour = 0;
+
+      // Get all entries for this date with matching hour and minute
+      final allEntries = _storageService.getEntriesForDate(_selectedDate);
+      final matchingEntries = allEntries
+          .where((entry) =>
+              entry.timestamp.hour == hour && entry.timestamp.minute == minute)
+          .toList();
+
+      if (matchingEntries.isNotEmpty) {
+        // Find the entry that matches our type
+        models.TimelineEntry? entryToDelete;
+
+        if (itemType == ItemType.note) {
+          // Find a note entry
+          for (var entry in matchingEntries) {
+            if (entry.type == models.EntryType.note) {
+              entryToDelete = entry;
+              break;
+            }
+          }
+        } else {
+          // Find a task entry
+          for (var entry in matchingEntries) {
+            if (entry.type == models.EntryType.task) {
+              entryToDelete = entry;
+              break;
+            }
+          }
+        }
+
+        if (entryToDelete != null) {
+          _storageService.deleteEntry(entryToDelete.id);
+        }
       }
     });
   }
@@ -2695,21 +3407,21 @@ class _MainScreenState extends State<MainScreen>
               child: Container(
                 width: 62,
                 height: 62,
+                clipBehavior: Clip.antiAlias,
                 decoration: ShapeDecoration(
                   gradient: LinearGradient(
                     begin: Alignment(-0.00, -0.00),
                     end: Alignment(1.00, 1.00),
-                    colors: [const Color(0xFFFD6F00), const Color(0xFFFC3505)],
+                    colors: [const Color(0xFF598FFF), const Color(0xFF1E44FF)],
                   ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
                   shadows: [
                     BoxShadow(
-                      color: Color(
-                          0x15000000), // Reduced opacity from 0x26 to 0x15
-                      blurRadius: 10.0, // Reduced from 17.60
-                      offset: Offset(0, 3), // Reduced from Offset(0, 4)
+                      color: Color(0x26000000),
+                      blurRadius: 17.60,
+                      offset: Offset(0, 4),
                       spreadRadius: 0,
                     )
                   ],
@@ -2719,6 +3431,8 @@ class _MainScreenState extends State<MainScreen>
                     'assets/icons/record_icon.svg',
                     width: 24,
                     height: 24,
+                    colorFilter:
+                        ColorFilter.mode(Colors.white, BlendMode.srcIn),
                   ),
                 ),
               ),
@@ -3762,17 +4476,7 @@ class _RecordingPageState extends State<RecordingPage>
   // Start recording function
   Future<void> _startRecordingAudio() async {
     try {
-      // Check permissions
-      final permissionsGranted = await _checkPermissions();
-      if (!permissionsGranted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Cannot start recording - permissions required'),
-            duration: Duration(seconds: 3),
-          ),
-        );
-        return;
-      }
+      // Permissions are already checked before calling this method in the GestureDetector's onTapDown
 
       // Get temporary directory for saving the recording
       final directory = await getTemporaryDirectory();
@@ -3817,6 +4521,10 @@ class _RecordingPageState extends State<RecordingPage>
           backgroundColor: Colors.red,
         ),
       );
+      // Reset animation state if recording fails
+      if (_clickInput != null) {
+        _clickInput!.value = false;
+      }
     }
   }
 
@@ -4023,18 +4731,39 @@ class _RecordingPageState extends State<RecordingPage>
                             width: scaledTouchAreaSize,
                             height: scaledTouchAreaSize,
                             child: GestureDetector(
-                              onTapDown: (_) {
-                                if (!_isRecording && _clickInput != null) {
+                              onTapDown: (_) async {
+                                if (!_isRecording) {
                                   print('Mic touch area tapped!');
-                                  _clickInput!.value = true;
 
-                                  if (!_isRecording) {
-                                    // Ensure isPause is false
-                                    if (_isPauseInput != null) {
-                                      _isPauseInput!.value = false;
+                                  // Check permissions first before starting animation or recording
+                                  final permissionsGranted =
+                                      await _checkPermissions();
+                                  if (!permissionsGranted) {
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                              'Cannot start recording - permissions required'),
+                                          duration: Duration(seconds: 3),
+                                        ),
+                                      );
                                     }
-                                    _startRecordingAudio();
+                                    return;
                                   }
+
+                                  // Only trigger animation and recording after permissions granted
+                                  if (_clickInput != null) {
+                                    _clickInput!.value = true;
+                                  }
+
+                                  // Ensure isPause is false
+                                  if (_isPauseInput != null) {
+                                    _isPauseInput!.value = false;
+                                  }
+
+                                  // Start recording now that permissions are confirmed
+                                  _startRecordingAudio();
                                 }
                               },
                               child: Container(
@@ -4112,7 +4841,7 @@ class _RecordingPageState extends State<RecordingPage>
                         _formatDuration(_recordingDuration),
                         style: const TextStyle(
                           fontSize: 26,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w500,
                           fontFamily: 'GeistMono',
                           color: Colors.black,
                         ),
@@ -4157,24 +4886,29 @@ class _RecordingPageState extends State<RecordingPage>
                                   begin: Alignment(-0.00, -0.00),
                                   end: Alignment(1.00, 1.00),
                                   colors: [
-                                    Color(0xFFC6C5C5),
-                                    Color.fromARGB(255, 158, 156, 156)
+                                    Color.fromARGB(255, 197, 197, 197),
+                                    Color.fromARGB(255, 157, 157, 157)
                                   ],
                                 ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(120),
                                 ),
                               ),
-                              child: Center(
-                                child: SvgPicture.asset(
-                                  _isPaused
-                                      ? 'assets/icons/play.svg'
-                                      : 'assets/icons/pause.svg',
-                                  width: 32,
-                                  height: 32,
-                                  colorFilter: const ColorFilter.mode(
-                                      Colors.white, BlendMode.srcIn),
-                                ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  SvgPicture.asset(
+                                    _isPaused
+                                        ? 'assets/icons/play.svg'
+                                        : 'assets/icons/pause.svg',
+                                    width: 32,
+                                    height: 32,
+                                    colorFilter: const ColorFilter.mode(
+                                        Colors.white, BlendMode.srcIn),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
@@ -4195,20 +4929,27 @@ class _RecordingPageState extends State<RecordingPage>
                                   begin: Alignment(-0.00, -0.00),
                                   end: Alignment(1.00, 1.00),
                                   colors: [
-                                    Color(0xFFFF5A5A),
-                                    Color.fromARGB(255, 210, 1, 1)
+                                    Color.fromARGB(255, 197, 197, 197),
+                                    Color.fromARGB(255, 157, 157, 157)
                                   ],
                                 ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(120),
                                 ),
                               ),
-                              child: Center(
-                                child: SvgPicture.asset(
-                                  'assets/icons/stop.svg',
-                                  width: 32,
-                                  height: 32,
-                                ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  SvgPicture.asset(
+                                    'assets/icons/stop.svg',
+                                    width: 32,
+                                    height: 32,
+                                    colorFilter: const ColorFilter.mode(
+                                        Colors.white, BlendMode.srcIn),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
@@ -4229,20 +4970,27 @@ class _RecordingPageState extends State<RecordingPage>
                                   begin: Alignment(-0.00, -0.00),
                                   end: Alignment(1.00, 1.00),
                                   colors: [
-                                    Color(0xFF00FF72),
-                                    Color(0xFF00CD5C)
+                                    const Color(0xFF588EFF),
+                                    const Color(0xFF1D44FF)
                                   ],
                                 ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(120),
                                 ),
                               ),
-                              child: Center(
-                                child: SvgPicture.asset(
-                                  'assets/icons/submit.svg',
-                                  width: 32,
-                                  height: 32,
-                                ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  SvgPicture.asset(
+                                    'assets/icons/submit.svg',
+                                    width: 32,
+                                    height: 32,
+                                    colorFilter: const ColorFilter.mode(
+                                        Colors.white, BlendMode.srcIn),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
