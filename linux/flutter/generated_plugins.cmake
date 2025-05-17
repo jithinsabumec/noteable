@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   record_linux
+  rive_common
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

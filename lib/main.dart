@@ -5,6 +5,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math'; // Import for Random and sqrt
+import 'dart:async'; // Import for Timer
 import 'config.dart';
 import 'services/deepseek_service.dart';
 import 'dart:async';
@@ -14,9 +16,20 @@ import 'time_icons.dart';
 import 'package:zelo/services/storage_service.dart';
 import 'package:zelo/models/timeline_entry.dart' as models;
 import 'package:flutter_svg/flutter_svg.dart'; // Add this import
+import 'package:rive/rive.dart' as rive; // Import Rive with an alias
+import 'package:flutter/services.dart'; // Import for rootBundle
+import 'package:flutter/rendering.dart'; // Import for RepaintBoundary
+import 'package:flutter/widgets.dart'; // Import for FlutterView
+
+// Add a GlobalKey to keep track of the MainScreen state
+final mainScreenKey = GlobalKey<_MainScreenState>();
 
 void main() async {
+  // Ensure Flutter is properly initialized with all bindings
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Rive
+  await rive.RiveFile.initialize();
 
   // Initialize storage service
   await StorageService().initialize();
@@ -35,7 +48,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         fontFamily: 'Geist',
       ),
-      home: const MainScreen(),
+      home: MainScreen(key: mainScreenKey),
     );
   }
 }
@@ -56,9 +69,19 @@ class _MainScreenState extends State<MainScreen>
   String? _recordedFilePath;
   String _transcribedText = '';
   bool _isTranscribing = false;
+  bool _isUnderstanding = false; // New state for understanding phase
   bool _isAnalyzing = false;
   final DeviceInfoPlugin _deviceInfoPlugin = DeviceInfoPlugin();
   DateTime _selectedDate = DateTime.now();
+
+  // Timer for animation sequence
+  Timer? _animationSequenceTimer;
+
+  // Controller for the animation sequence
+  final _animationController = GlobalKey<_AnimationSequenceControllerState>();
+
+  // Flag to track if animations are visible or not
+  bool _showAnimations = false;
 
   // State for drag mode
   String? _dragItemTimestamp;
@@ -76,6 +99,9 @@ class _MainScreenState extends State<MainScreen>
   // Map to store entries by timestamp for the currently selected date
   final Map<String, List<TimelineEntry>> _timelineEntriesByDate = {};
 
+  List<FocusNode> _sheetFocusNodes =
+      []; // Moved here to be accessible for disposal
+
   @override
   void initState() {
     super.initState();
@@ -83,11 +109,49 @@ class _MainScreenState extends State<MainScreen>
     _clearPlaceholderData();
     // Load entries for the current date
     _loadEntriesForSelectedDate();
+
+    // Preload all Rive animations to avoid delays
+    _preloadRiveAnimations();
+  }
+
+  // Preload Rive animations
+  Future<void> _preloadRiveAnimations() async {
+    try {
+      print('Preloading Rive animations');
+      // List of animations to preload
+      final animations = [
+        'assets/animations/transcribe.riv',
+        'assets/animations/understand.riv',
+        'assets/animations/extract.riv',
+      ];
+
+      // Load each animation in parallel
+      await Future.wait(animations.map((path) async {
+        try {
+          print('Preloading: $path');
+          final data = await rootBundle.load(path);
+          final file = rive.RiveFile.import(data);
+          print('Preloaded: $path');
+        } catch (e) {
+          print('Error preloading Rive animation $path: $e');
+        }
+      }));
+
+      print('All Rive animations preloaded');
+    } catch (e) {
+      print('Error in preloading Rive animations: $e');
+    }
   }
 
   @override
   void dispose() {
     _audioRecorder.dispose();
+    // Dispose all focus nodes from the last shown bottom sheet
+    for (var node in _sheetFocusNodes) {
+      node.dispose();
+    }
+    _sheetFocusNodes.clear();
+    _animationSequenceTimer?.cancel(); // Cancel animation sequence timer
     super.dispose();
   }
 
@@ -463,123 +527,266 @@ class _MainScreenState extends State<MainScreen>
     return false;
   }
 
-  Future<void> _startRecording() async {
-    print("_startRecording called - Starting recording process");
-    try {
-      print("Starting recording process...");
+  // Add a new recording directly
+  void _startRecording() async {
+    print("_startRecording called - Opening recording page");
+    _toggleFabExpanded(); // Close the menu
 
-      // Dismiss keyboard explicitly to ensure clean UI
-      FocusManager.instance.primaryFocus?.unfocus();
+    // Prepare for seamless transition by setting up states
+    // This prevents flash of original UI when returning from RecordingPage
+    setState(() {
+      _showAnimations = false; // Don't show animations yet
+      _isTranscribing = false;
+      _isUnderstanding = false;
+      _isAnalyzing = false;
+    });
 
-      // Check permissions before starting recording
-      print("Checking permissions...");
-      final permissionsGranted = await _checkPermissions();
-
-      if (!permissionsGranted) {
-        print("Permissions not granted");
-        // Show explicit error message for emulators
-        final deviceInfo = await _deviceInfoPlugin.androidInfo;
-        final isEmulator = deviceInfo.isPhysicalDevice != null &&
-            !deviceInfo.isPhysicalDevice!;
-
-        if (isEmulator) {
-          // For emulators, show a specific message and try to request permissions directly
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                  'Running on emulator - requesting storage permission directly'),
-              duration: Duration(seconds: 3),
-            ),
+    // Navigate to the recording page
+    final result = await Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            RecordingPage(),
+        transitionDuration: const Duration(milliseconds: 300),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(
+            opacity: animation,
+            child: child,
           );
+        },
+      ),
+    );
 
-          // Directly request storage permissions for emulators
-          if (await Permission.storage.request().isGranted ||
-              await Permission.manageExternalStorage.request().isGranted) {
-            // If granted, continue with recording
-            await _startRecordingProcess();
-            return;
-          }
-        } else {
-          // Show a clearer error message for real devices
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Cannot start recording - permissions required'),
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
-        return;
+    // Handle result from recording page if needed
+    if (result != null &&
+        result['success'] == true &&
+        result['filePath'] != null) {
+      // When we return from recording, the animation has already started there
+      // Just continue it here without any visual interruption
+      setState(() {
+        _isTranscribing = true;
+        _isUnderstanding = false;
+        _isAnalyzing = false;
+        _showAnimations = true; // Show animations immediately
+      });
+
+      // Ensure the animation controller shows the first animation
+      if (_animationController.currentState != null) {
+        _animationController.currentState!.showAnimation('transcribe');
       }
 
-      print("Permissions granted, starting actual recording...");
-      await _startRecordingProcess();
-      if (_isRecording) {
-        // Check if recording actually started
-        _toggleFabExpanded(); // Close the FAB menu
+      print("Recording completed - Continuing animation sequence");
+
+      // Start the animation sequence with a small delay to ensure smooth transition
+      await Future.delayed(Duration(milliseconds: 50));
+      _startProcessingAnimationSequence("");
+
+      // Start actual transcription in the background
+      await _transcribeAudio(result['filePath']);
+    } else {
+      // If recording was cancelled, make sure no animations are showing
+      _animationSequenceTimer?.cancel();
+      setState(() {
+        _showAnimations = false;
+        _isTranscribing = false;
+        _isUnderstanding = false;
+        _isAnalyzing = false;
+      });
+    }
+  }
+
+  Future<void> _pauseRecording() async {
+    // This method in _MainScreenState was incorrectly trying to control Rive's _clickInput.
+    // The Rive animation is self-contained in RecordingPage.
+    // If _MainScreenState initiated a recording that it needs to pause via its own _audioRecorder instance,
+    // it should do so here. However, the primary recording flow seems to have moved to RecordingPage.
+    // For now, we'll ensure it doesn't crash due to _clickInput.
+    print(
+        "_MainScreenState._pauseRecording called. Current recording logic primarily in RecordingPage.");
+    try {
+      // Example: if _MainScreenState still had its own recording session it could manage
+      // This is a placeholder, as the main recording is in RecordingPage
+      if (await _audioRecorder.isRecording() ||
+          await _audioRecorder.isPaused()) {
+        if (_isPaused) {
+          // await _audioRecorder.resume(); // If _MainScreenState's recorder was active
+          print(
+              "_MainScreenState: Attempting to resume its own recorder (if any).");
+        } else {
+          // await _audioRecorder.pause(); // If _MainScreenState's recorder was active
+          print(
+              "_MainScreenState: Attempting to pause its own recorder (if any).");
+        }
+        // setState(() => _isPaused = !_isPaused); // Update _MainScreenState's own _isPaused
       }
     } catch (e) {
-      print('Error starting recording: $e');
-      // Show a more visible error message
+      print('_MainScreenState: Error in _pauseRecording: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error in _MainScreenState._pauseRecording: $e'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  // Start a timed animation sequence
+  void _startProcessingAnimationSequence(String text) {
+    // Cancel any existing timer first
+    _animationSequenceTimer?.cancel();
+
+    // Show animations and set the first animation type - don't need setState here
+    // as the state should already be set correctly from _startRecording
+    if (!_showAnimations) {
+      setState(() {
+        _showAnimations = true;
+        _isTranscribing = true;
+        _isUnderstanding = false;
+        _isAnalyzing = false;
+      });
+    }
+
+    print(
+        "Starting/continuing animation sequence: transcribe -> understand -> extract");
+
+    // Start with the transcribe animation if not already showing
+    if (_animationController.currentState != null) {
+      _animationController.currentState!.showAnimation('transcribe');
+    }
+
+    // Start a sequence of timers for the animations
+    // First 5 seconds: Transcribing (this animation is already showing from RecordingPage)
+    _animationSequenceTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) {
+        print("Animation transition: transcribe -> understand");
+
+        // Update the state for compatibility
+        setState(() {
+          _isTranscribing = false;
+          _isUnderstanding = true;
+          _isAnalyzing = false;
+        });
+
+        // Show the understand animation without any fade
+        if (_animationController.currentState != null) {
+          _animationController.currentState!.showAnimation('understand');
+        }
+
+        // Next 5 seconds: Understanding
+        _animationSequenceTimer = Timer(const Duration(seconds: 5), () {
+          if (mounted) {
+            print("Animation transition: understand -> extract");
+
+            // Update the state for compatibility
+            setState(() {
+              _isTranscribing = false;
+              _isUnderstanding = false;
+              _isAnalyzing = true;
+            });
+
+            // Show the extract animation without any fade
+            if (_animationController.currentState != null) {
+              _animationController.currentState!.showAnimation('extract');
+            }
+
+            // Start the actual processing - use the most recent transcribed text
+            // rather than the original text passed to this method
+            _performActualTextProcessing(
+                _transcribedText.isNotEmpty ? _transcribedText : text);
+          }
+        });
+      }
+    });
+  }
+
+  // Perform the actual text processing after animations
+  Future<void> _performActualTextProcessing(String text) async {
+    try {
+      final result = await _deepseekService.analyzeTranscription(text);
+
+      // Create a new timeline entry with current timestamp
+      final now = DateTime.now();
+      final hour = now.hour > 12
+          ? now.hour - 12
+          : now.hour == 0
+              ? 12
+              : now.hour;
+      final minute = now.minute.toString().padLeft(2, '0');
+      final ampm = now.hour >= 12 ? 'PM' : 'AM';
+      final timestamp = '$hour:$minute $ampm';
+      final isDaytime = now.hour >= 6 && now.hour < 18;
+
+      setState(() {
+        // Extract notes and tasks from the LLM result
+        List<String> notes = [];
+        List<TaskItem> tasks = [];
+
+        if (result['notes'] != null && result['notes'].isNotEmpty) {
+          notes = List<String>.from(result['notes']);
+        }
+
+        if (result['tasks'] != null && result['tasks'].isNotEmpty) {
+          final taskStrings = List<String>.from(result['tasks']);
+          tasks = taskStrings
+              .map((taskText) => TaskItem(
+                    task: taskText,
+                    completed: false,
+                  ))
+              .toList();
+        }
+
+        // Create a new timeline entry
+        _timelineEntriesByDate[timestamp] = [
+          TimelineEntry(
+              timestamp: timestamp,
+              isDaytime: isDaytime,
+              notes: notes,
+              tasks: tasks,
+              itemOrder: [] // Initialize and then populate below
+              )
+        ];
+        // Explicitly build itemOrder after notes and tasks are set for the new entry from DeepSeek
+        if (_timelineEntriesByDate[timestamp]!.isNotEmpty) {
+          _timelineEntriesByDate[timestamp]!.first.rebuildItemOrder();
+        }
+
+        _isAnalyzing = false;
+
+        // Only now, hide the animations after processing is complete
+        _showAnimations = false;
+      });
+
+      // Show a snackbar with the results
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Your recording has been processed'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      print('Error analyzing with DeepSeek: $e');
+      setState(() {
+        _isAnalyzing = false;
+        _showAnimations = false; // Hide animations on error
+      });
+      // Show error message to user
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Recording error: ${e.toString()}'),
-          duration: const Duration(seconds: 5),
+          content: Text('Error processing recording: ${e.toString()}'),
+          duration: const Duration(seconds: 3),
           backgroundColor: Colors.red,
         ),
       );
     }
   }
 
-  // Extracted method to start the actual recording process
-  Future<void> _startRecordingProcess() async {
-    final directory = await getTemporaryDirectory();
-    _recordedFilePath =
-        '${directory.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
-
-    print('Recording file path: $_recordedFilePath');
-
-    // Start recording with updated configuration for Record 6.0.0
-    await _audioRecorder.start(
-      RecordConfig(
-        encoder: AudioEncoder.aacLc,
-        bitRate: 128000,
-        sampleRate: 44100,
-      ),
-      path: _recordedFilePath!,
-    );
-    setState(() {
-      _isRecording = true;
-      _isPaused = false;
-      _transcribedText = '';
-    });
-  }
-
-  Future<void> _pauseRecording() async {
-    try {
-      if (_isPaused) {
-        await _audioRecorder.resume();
-      } else {
-        await _audioRecorder.pause();
-      }
-      setState(() => _isPaused = !_isPaused);
-    } catch (e) {
-      print('Error pausing/resuming recording: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error pausing/resuming recording: $e'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
-  }
-
   Future<void> _transcribeAudio(String filePath) async {
-    setState(() {
-      _isTranscribing = true;
-      _transcribedText = 'Transcribing...';
-    });
-
     try {
+      // We don't need to start animation sequence here anymore
+      // as it's already started in _startRecording
+
       // Upload the file to AssemblyAI
       const uploadUrl = 'https://api.assemblyai.com/v2/upload';
       final file = File(filePath);
@@ -633,6 +840,7 @@ class _MainScreenState extends State<MainScreen>
       final transcriptId = transcriptData['id'];
 
       // Poll for transcription completion
+      String transcribedText = '';
       while (true) {
         final statusResponse = await http.get(
           Uri.parse('https://api.assemblyai.com/v2/transcript/$transcriptId'),
@@ -650,13 +858,7 @@ class _MainScreenState extends State<MainScreen>
         print('Transcription status: ${statusData['status']}');
 
         if (statusData['status'] == 'completed') {
-          setState(() {
-            _transcribedText = statusData['text'];
-            _isTranscribing = false;
-          });
-
-          // Now analyze the text with DeepSeek
-          await _analyzeWithDeepSeek(_transcribedText);
+          transcribedText = statusData['text'];
           break;
         } else if (statusData['status'] == 'error') {
           throw Exception('Transcription failed: ${statusData['error']}');
@@ -664,95 +866,38 @@ class _MainScreenState extends State<MainScreen>
 
         await Future.delayed(const Duration(seconds: 3));
       }
+
+      // Set the transcribed text - the animation sequence is already running
+      // so we don't need to restart it
+      _transcribedText = transcribedText;
     } catch (e) {
       print('Error transcribing audio: $e');
+      // Cancel animation sequence and hide animations
+      _animationSequenceTimer?.cancel();
       setState(() {
         _transcribedText = 'Error transcribing audio: $e';
+        _showAnimations = false; // Hide animations
         _isTranscribing = false;
+        _isUnderstanding = false;
+        _isAnalyzing = false;
       });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error transcribing audio: ${e.toString()}'),
+          duration: const Duration(seconds: 3),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
   Future<void> _analyzeWithDeepSeek(String text) async {
     if (text.isEmpty) return;
 
-    setState(() {
-      _isAnalyzing = true;
-    });
-
-    try {
-      final result = await _deepseekService.analyzeTranscription(text);
-
-      // Create a new timeline entry with current timestamp
-      final now = DateTime.now();
-      final hour = now.hour > 12
-          ? now.hour - 12
-          : now.hour == 0
-              ? 12
-              : now.hour;
-      final minute = now.minute.toString().padLeft(2, '0');
-      final ampm = now.hour >= 12 ? 'PM' : 'AM';
-      final timestamp = '$hour:$minute $ampm';
-      final isDaytime = now.hour >= 6 && now.hour < 18;
-
-      setState(() {
-        // Extract notes and tasks from the LLM result
-        List<String> notes = [];
-        List<TaskItem> tasks = [];
-
-        if (result['notes'] != null && result['notes'].isNotEmpty) {
-          notes = List<String>.from(result['notes']);
-        }
-
-        if (result['tasks'] != null && result['tasks'].isNotEmpty) {
-          final taskStrings = List<String>.from(result['tasks']);
-          tasks = taskStrings
-              .map((taskText) => TaskItem(
-                    task: taskText,
-                    completed: false,
-                  ))
-              .toList();
-        }
-
-        // Create a new timeline entry
-        _timelineEntriesByDate[timestamp] = [
-          TimelineEntry(
-              timestamp: timestamp,
-              isDaytime: isDaytime,
-              notes: notes,
-              tasks: tasks,
-              itemOrder: [] // Initialize and then populate below
-              )
-        ];
-        // Explicitly build itemOrder after notes and tasks are set for the new entry from DeepSeek
-        if (_timelineEntriesByDate[timestamp]!.isNotEmpty) {
-          _timelineEntriesByDate[timestamp]!.first.rebuildItemOrder();
-        }
-
-        _isAnalyzing = false;
-      });
-
-      // Show a snackbar with the results
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Your recording has been processed'),
-          duration: Duration(seconds: 3),
-        ),
-      );
-    } catch (e) {
-      print('Error analyzing with DeepSeek: $e');
-      setState(() {
-        _isAnalyzing = false;
-      });
-      // Show error message to user
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error processing recording: ${e.toString()}'),
-          duration: const Duration(seconds: 3),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+    // Now this method is obsolete as we handle everything in the animation sequence
+    // Just start the animation sequence
+    _startProcessingAnimationSequence(text);
   }
 
   Future<void> _stopRecording() async {
@@ -767,6 +912,10 @@ class _MainScreenState extends State<MainScreen>
 
         // Start transcription
         if (path != null) {
+          // Start animation sequence immediately
+          _startProcessingAnimationSequence("");
+
+          // Then start actual transcription in the background
           await _transcribeAudio(path);
         }
       }
@@ -893,11 +1042,15 @@ class _MainScreenState extends State<MainScreen>
 
   @override
   Widget build(BuildContext context) {
+    // Check if any loading state is active
+    final bool isLoading = _showAnimations;
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
         child: Stack(
           children: [
+            // Main content
             Padding(
               padding: const EdgeInsets.only(
                   bottom: 24.0, top: 16.0, left: 24.0, right: 24.0),
@@ -948,40 +1101,19 @@ class _MainScreenState extends State<MainScreen>
               ), // End of LayoutBuilder
             ),
 
-            if (_isTranscribing || _isAnalyzing)
+            // Animation sequence controller - always there but only visible when needed
+            if (_showAnimations)
               Positioned.fill(
-                child: Container(
-                  color: Colors.black.withOpacity(0.3),
-                  child: Center(
-                    child: Card(
-                      color: Theme.of(context).cardColor,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const CircularProgressIndicator(),
-                            const SizedBox(height: 16),
-                            Text(
-                              _isTranscribing
-                                  ? 'Transcribing your recording...'
-                                  : 'Analyzing your recording...',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                child: AnimationSequenceController(key: _animationController),
               ),
 
-            // Expandable FAB at the bottom right corner
-            Positioned(
-              right: 24, // Changed from 16
-              bottom: 100, // Changed from 16
-              child: _buildExpandableFAB(),
-            ),
+            // Expandable FAB at the bottom right corner - only show when not loading
+            if (!isLoading)
+              Positioned(
+                right: 24, // Changed from 16
+                bottom: 100, // Changed from 16
+                child: _buildExpandableFAB(),
+              ),
           ],
         ),
       ),
@@ -1744,8 +1876,10 @@ class _MainScreenState extends State<MainScreen>
   }) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true, // Important for keyboard visibility
+      backgroundColor: Colors.white, // Set bottom sheet background to white
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (BuildContext context) {
         return SafeArea(
@@ -2600,93 +2734,463 @@ class _MainScreenState extends State<MainScreen>
 
   // Add a new note directly
   void _addNote() {
-    print("_addNote called - Opening note dialog");
+    print("_addNote called - Opening note bottom sheet");
     _toggleFabExpanded(); // Close the menu
+    _showAddNoteBottomSheet(initialTab: 'Notes'); // Specify 'Notes' tab
+  }
 
-    // Create a controller for the text field
-    final TextEditingController controller = TextEditingController();
+  // Show the bottom sheet for adding a new note or task
+  void _showAddNoteBottomSheet({String initialTab = 'Notes'}) {
+    // Dispose any previous sheet's focus nodes before creating new ones
+    for (var node in _sheetFocusNodes) {
+      node.dispose();
+    }
+    _sheetFocusNodes.clear();
 
-    // Create a dialog to get note content
-    showDialog(
+    List<TextEditingController> _textControllers = [TextEditingController()];
+    _sheetFocusNodes
+        .add(FocusNode()); // Add initial focus node to the class-level list
+
+    String selectedType = initialTab;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_sheetFocusNodes.isNotEmpty) {
+        _sheetFocusNodes.first.requestFocus();
+      }
+    });
+
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add Note'),
-        content: TextField(
-          controller: controller,
-          maxLines: 5,
-          decoration: const InputDecoration(
-            hintText: 'Enter your note here...',
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (value) {
-            if (value.isNotEmpty) {
-              _createNoteEntry(value);
-              Navigator.pop(context);
-            }
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) {
-                _createNoteEntry(controller.text);
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('Add'),
-          ),
-        ],
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          // Re-added StatefulBuilder
+          builder: (BuildContext context, StateSetter setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+                left: 24,
+                right: 24,
+                top: 16,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    // Drag handle
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[300],
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Segmented Control (Notes/Tasks) - with animated background
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final containerWidth = constraints.maxWidth;
+                        final gap = 4.0; // 4 pixel gap between tabs
+                        final tabWidth = (containerWidth - 8 - gap) /
+                            2; // Account for container padding and gap
+
+                        return Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEEEEEE),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFE4E4E4)),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x19000000),
+                                blurRadius: 17.60,
+                                offset: Offset(0, 4),
+                                spreadRadius: 0,
+                              )
+                            ],
+                          ),
+                          height: 46, // Fixed height for the container
+                          child: Stack(
+                            children: [
+                              // Animated background that slides
+                              AnimatedPositioned(
+                                duration: const Duration(milliseconds: 250),
+                                curve: Curves.easeInOut,
+                                left: selectedType == 'Notes'
+                                    ? 0
+                                    : tabWidth +
+                                        gap, // Add gap for Tasks position
+                                top: 0,
+                                bottom: 0,
+                                width: tabWidth, // Equal width for both tabs
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(6),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.05),
+                                        blurRadius: 5,
+                                        offset: const Offset(0, 2),
+                                      )
+                                    ],
+                                  ),
+                                ),
+                              ),
+
+                              // Tab buttons
+                              Row(
+                                children: <Widget>[
+                                  // Notes Tab - Exactly half width
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setModalState(() {
+                                          selectedType = 'Notes';
+                                        });
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.transparent,
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            SvgPicture.asset(
+                                              'assets/icons/notes.svg',
+                                              width: 18,
+                                              height: 18,
+                                              colorFilter: ColorFilter.mode(
+                                                selectedType == 'Notes'
+                                                    ? Colors.black
+                                                    : Colors.grey.shade600,
+                                                BlendMode.srcIn,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              'Notes',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontFamily: 'Geist',
+                                                color: selectedType == 'Notes'
+                                                    ? Colors.black
+                                                    : Colors.grey.shade600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+
+                                  // Tasks Tab - Exactly half width
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setModalState(() {
+                                          selectedType = 'Tasks';
+                                        });
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.transparent,
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            SvgPicture.asset(
+                                              'assets/icons/tasks.svg',
+                                              width: 18,
+                                              height: 18,
+                                              colorFilter: ColorFilter.mode(
+                                                selectedType == 'Tasks'
+                                                    ? Colors.black
+                                                    : Colors.grey.shade600,
+                                                BlendMode.srcIn,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              'Tasks',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontFamily: 'Geist',
+                                                color: selectedType == 'Tasks'
+                                                    ? Colors.black
+                                                    : Colors.grey.shade600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Text Field(s) and "Add new note" button - Completely refactored structure
+                    Column(
+                      children: [
+                        const SizedBox(
+                            height:
+                                24), // Add 24px space between toggle and text
+
+                        // Title - Different text based on selected type
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            selectedType == 'Notes'
+                                ? "What's on your mind?"
+                                : "What's important today?",
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              fontFamily: 'Geist',
+                              color: Color(0xFF4B4B4B),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(
+                            height:
+                                12), // Add 12px space between text and text box
+
+                        // ListView for text fields
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _textControllers.length,
+                          itemBuilder: (context, index) {
+                            return Padding(
+                              padding: EdgeInsets.only(bottom: 8.0),
+                              child: TextField(
+                                key: ValueKey(
+                                    'textfield_${index}_${_textControllers[index].hashCode}'), // Unique key for each field
+                                controller: _textControllers[index],
+                                focusNode: _sheetFocusNodes[
+                                    index], // Use class-level list
+                                minLines: 3,
+                                maxLines: 5,
+                                // autofocus: index == 0, // Replaced by manual requestFocus
+                                decoration: InputDecoration(
+                                  hintText: selectedType == 'Notes'
+                                      ? "I\'ve been thinking about..."
+                                      : "I need to...",
+                                  hintStyle:
+                                      const TextStyle(color: Color(0xFFB3B3B3)),
+                                  fillColor: const Color(0xFFF9F9F9),
+                                  filled: true,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(6),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFFE1E1E1),
+                                      width: 1.0,
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(6),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFFE1E1E1),
+                                      width: 1.0,
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(6),
+                                    borderSide: const BorderSide(
+                                      color: Color(0xFFE1E1E1),
+                                      width: 1.0,
+                                    ),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+
+                        // Add new note button
+                        Padding(
+                          padding: const EdgeInsets.only(
+                              top: 0), // Removed the top padding
+                          child: Center(
+                            child: TextButton(
+                              onPressed: () {
+                                print(
+                                    "Add new note button pressed! Current count: ${_textControllers.length}");
+                                setModalState(() {
+                                  final newController = TextEditingController();
+                                  final newFocusNode = FocusNode();
+                                  _textControllers.add(newController);
+                                  _sheetFocusNodes.add(
+                                      newFocusNode); // Add to class-level list
+                                  print(
+                                      "Added new controller. New count: ${_textControllers.length}");
+
+                                  Future.delayed(
+                                      const Duration(milliseconds: 50), () {
+                                    newFocusNode.requestFocus();
+                                  });
+                                });
+                              },
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical:
+                                      6, // Exact 12px horizontal, 6px vertical
+                                ),
+                                backgroundColor: const Color(0xFFFFFFFF),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                  side: const BorderSide(
+                                      color: Color(0xFFE1E1E1), width: 1.0),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  const Icon(Icons.add,
+                                      color: Color(0xFF858585), size: 20),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    selectedType == 'Notes'
+                                        ? 'Add new note'
+                                        : 'Add new task',
+                                    style: const TextStyle(
+                                      color: Color(0xFF848484),
+                                      fontFamily: 'Geist',
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 48),
+
+                    // Bottom Action Buttons
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () {
+                              Navigator.pop(context); // Close bottom sheet
+                            },
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              textStyle: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  fontFamily: 'Geist'),
+                              foregroundColor: const Color(0xFF4B4B4B),
+                              side: BorderSide(color: Colors.grey.shade300),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text('Close'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {
+                              bool anEntryWasAdded = false;
+                              for (var controller in _textControllers) {
+                                if (controller.text.isNotEmpty) {
+                                  if (selectedType == 'Notes') {
+                                    _createNoteEntry(controller.text);
+                                  } else {
+                                    _createTaskEntry(controller.text);
+                                  }
+                                  anEntryWasAdded = true;
+                                }
+                              }
+
+                              if (anEntryWasAdded) {
+                                Navigator.pop(context); // Close bottom sheet
+                              } else {
+                                // Optionally show a message if all fields are empty
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                        'Please enter a ${selectedType.toLowerCase().substring(0, selectedType.length - 1)} to add.'),
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              textStyle: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  fontFamily: 'Geist'),
+                              backgroundColor: Colors.black,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Text(selectedType == 'Notes'
+                                ? 'Add note'
+                                : 'Add task'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16), // Padding at the bottom
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
   // Add a new task directly
   void _addTask() {
-    print("_addTask called - Opening task dialog");
+    print("_addTask called - Opening task bottom sheet");
     _toggleFabExpanded(); // Close the menu
-
-    // Create a controller for the text field
-    final TextEditingController controller = TextEditingController();
-
-    // Create a dialog to get task content
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add Task'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            hintText: 'Enter your task here...',
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (value) {
-            if (value.isNotEmpty) {
-              _createTaskEntry(value);
-              Navigator.pop(context);
-            }
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) {
-                _createTaskEntry(controller.text);
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
+    _showAddNoteBottomSheet(
+        initialTab:
+            'Tasks'); // Call same bottom sheet but with 'Tasks' pre-selected
   }
 
   // Create a new note entry with the current timestamp
@@ -2736,8 +3240,6 @@ class _MainScreenState extends State<MainScreen>
             TimelineItemRef(type: ItemType.note, index: newNoteIndex)
           ],
         );
-        newUiEntry.itemOrder.add(TimelineItemRef(
-            type: ItemType.note, index: newNoteIndex)); // Add ref for the note
         _timelineEntriesByDate[timestamp] = [newUiEntry];
       }
     });
@@ -2798,8 +3300,6 @@ class _MainScreenState extends State<MainScreen>
             TimelineItemRef(type: ItemType.task, index: newTaskIndex)
           ],
         );
-        newUiEntry.itemOrder.add(TimelineItemRef(
-            type: ItemType.task, index: newTaskIndex)); // Add ref for the task
         _timelineEntriesByDate[timestamp] = [newUiEntry];
       }
     });
@@ -3039,5 +3539,1140 @@ class PlusIconPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) {
     return false; // The icon itself doesn't change, only its rotation
+  }
+}
+
+// Add this class at the end of the file, before the existing CustomPainter classes
+class RecordingPage extends StatefulWidget {
+  const RecordingPage({Key? key}) : super(key: key);
+
+  @override
+  _RecordingPageState createState() => _RecordingPageState();
+}
+
+class _RecordingPageState extends State<RecordingPage>
+    with SingleTickerProviderStateMixin {
+  final _audioRecorder = AudioRecorder();
+  bool _isRecording = false;
+  bool _isPaused = false;
+  String? _recordedFilePath;
+
+  // For recording duration
+  int _recordingDuration = 0; // in seconds
+  Timer? _timer;
+
+  // Rive animation controllers
+  rive.StateMachineController? _controller;
+  rive.SMIInput<bool>? _clickInput;
+  rive.SMIInput<bool>? _isPauseInput; // Store in class field
+
+  // For the Rive animation widget
+  rive.Artboard? _riveArtboard;
+  bool _riveLoaded = false;
+
+  // Add a new state to handle seamless transitions to the animation sequence
+  bool _isSubmitting = false;
+  rive.Artboard? _transcribeArtboard;
+  bool _transcribeLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRiveAnimation();
+    // Preload the transcribe animation for seamless transition
+    _preloadTranscribeAnimation();
+  }
+
+  // Preload the transcribe animation for seamless transitions
+  void _preloadTranscribeAnimation() async {
+    try {
+      print('Preloading transcribe animation');
+      final data = await rootBundle.load('assets/animations/transcribe.riv');
+      final file = rive.RiveFile.import(data);
+      final artboard = file.mainArtboard;
+
+      // Setup state machine if available
+      rive.StateMachineController? controller =
+          rive.StateMachineController.fromArtboard(artboard, 'State Machine 1');
+
+      if (controller != null) {
+        artboard.addController(controller);
+      } else if (artboard.animations.isNotEmpty) {
+        artboard.addController(
+            rive.SimpleAnimation(artboard.animations.first.name));
+      }
+
+      setState(() {
+        _transcribeArtboard = artboard;
+        _transcribeLoaded = true;
+      });
+
+      print('Transcribe animation preloaded');
+    } catch (e) {
+      print('Error preloading transcribe animation: $e');
+    }
+  }
+
+  void _loadRiveAnimation() async {
+    try {
+      print('Loading Rive animation from assets/animations/record.riv');
+
+      // Make sure Rive is initialized
+      await rive.RiveFile.initialize();
+
+      // Load the Rive file
+      final data = await rootBundle.load('assets/animations/record.riv');
+      print('Rive file loaded, size: ${data.lengthInBytes} bytes');
+
+      final file = rive.RiveFile.import(data);
+      print('Rive file imported successfully');
+
+      // Get available artboards for debugging
+      print('Available artboards:');
+      for (final artboard in file.artboards) {
+        print(' - ${artboard.name}');
+      }
+
+      // Setup the artboard - use the main artboard named "Artboard"
+      final artboard = file.mainArtboard;
+      print('Using artboard: ${artboard.name}');
+
+      // Setup Rive artboard with callback
+      var controller = rive.StateMachineController.fromArtboard(
+        artboard,
+        'State Machine 1', // Your state machine name
+      );
+
+      if (controller != null) {
+        print('State machine controller found');
+
+        // Set up controller listener before adding it to the artboard
+        controller.addEventListener((event) {
+          print('Rive event: $event');
+
+          // Check if Click input is triggered in the state machine
+          // Re-get the input value each time to ensure we have the latest value
+          rive.SMIInput<bool>? clickInput = controller.findInput<bool>('Click');
+          if (clickInput != null && clickInput.value && !_isRecording) {
+            print('Click input detected as activated - Touch Area was clicked');
+
+            // Start recording in the next frame to avoid build issues
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && !_isRecording) {
+                // Ensure isPause is false when starting
+                if (_isPauseInput != null) {
+                  print('Ensuring isPause is false');
+                  _isPauseInput!.value = false;
+                }
+                _startRecordingAudio();
+              }
+            });
+          }
+        });
+
+        // Add controller to artboard
+        artboard.addController(controller);
+
+        // Find inputs
+        _clickInput = controller.findInput<bool>('Click');
+        _isPauseInput =
+            controller.findInput<bool>('isPause'); // Store in class field
+        var isRecordingInput = controller.findInput<bool>('IsRecording');
+
+        print(
+            'Found inputs: Click=${_clickInput != null}, isPause=${_isPauseInput != null}, IsRecording=${isRecordingInput != null}');
+
+        _controller = controller;
+      } else {
+        print('State machine controller NOT found');
+      }
+
+      setState(() {
+        _riveArtboard = artboard;
+        _riveLoaded = true;
+      });
+
+      print('Rive animation loaded successfully');
+    } catch (error) {
+      print('Error loading Rive animation: $error');
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller?.dispose();
+    _audioRecorder.dispose();
+    super.dispose();
+  }
+
+  // Start recording function
+  Future<void> _startRecordingAudio() async {
+    try {
+      // Check permissions
+      final permissionsGranted = await _checkPermissions();
+      if (!permissionsGranted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cannot start recording - permissions required'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+        return;
+      }
+
+      // Get temporary directory for saving the recording
+      final directory = await getTemporaryDirectory();
+      _recordedFilePath =
+          '${directory.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+      print('Recording to file path: $_recordedFilePath');
+
+      // Start recording
+      await _audioRecorder.start(
+        RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 128000,
+          sampleRate: 44100,
+        ),
+        path: _recordedFilePath!,
+      );
+
+      setState(() {
+        _isRecording = true;
+        _isPaused = false;
+        _recordingDuration = 0;
+      });
+
+      // We don't need to trigger the animation manually here
+      // since it should already be triggered by the GestureDetector
+
+      // Start timer for duration
+      _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (_isRecording && !_isPaused) {
+          setState(() {
+            _recordingDuration++;
+          });
+        }
+      });
+    } catch (e) {
+      print('Error starting recording: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Recording error: ${e.toString()}'),
+          duration: const Duration(seconds: 5),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Pause/Resume recording
+  Future<void> _pauseResumeRecording() async {
+    if (!_isRecording) return;
+
+    try {
+      if (_isPaused) {
+        // Currently paused, so we are resuming
+        await _audioRecorder.resume();
+
+        // Update Rive animation state - resuming
+        if (_isPauseInput != null) {
+          print('Rive: Resuming animation (isPause -> false)');
+          _isPauseInput!.value =
+              false; // Set isPause to false to resume animation
+        }
+      } else {
+        // Currently recording, so we are pausing
+        await _audioRecorder.pause();
+
+        // Update Rive animation state - pausing
+        if (_isPauseInput != null) {
+          print('Rive: Pausing animation (isPause -> true)');
+          _isPauseInput!.value = true; // Set isPause to true to pause animation
+        }
+      }
+
+      // This setState call should be outside the try-catch or at least not cause issues if input is null.
+      // It's primarily for updating the UI based on _isPaused.
+      setState(() {
+        _isPaused = !_isPaused; // Toggle the pause state for UI updates
+      });
+    } catch (e) {
+      print('Error pausing/resuming recording: $e');
+      // Avoid calling setState here if the context might be invalid due to an error.
+      // Show SnackBar for user feedback.
+      if (mounted) {
+        // Check if the widget is still in the tree
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error pausing/resuming recording: $e'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  // Stop recording and discard
+  Future<void> _stopRecording({bool submit = false}) async {
+    if (!_isRecording) return;
+
+    try {
+      final path = await _audioRecorder.stop();
+
+      // Reset Rive animation state
+      if (_clickInput != null) {
+        _clickInput!.value = false; // Reset Click input
+      }
+      if (_isPauseInput != null) {
+        _isPauseInput!.value = false; // Ensure isPause is set to false
+      }
+
+      setState(() {
+        _isRecording = false;
+        _isPaused = false;
+      });
+
+      _timer?.cancel();
+
+      if (submit && path != null) {
+        // First show the transcribe animation directly in this screen
+        setState(() {
+          _isSubmitting = true;
+        });
+
+        // Wait a brief moment to ensure animation starts
+        await Future.delayed(const Duration(milliseconds: 100));
+
+        // Then return result to previous screen to continue the animation sequence
+        Navigator.pop(context, {
+          'success': true,
+          'filePath': path,
+          'preStartAnimation': true, // Signal that animation is already started
+        });
+      } else {
+        // Just close the recording page without processing
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      print('Error stopping recording: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error stopping recording: $e'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  // Format duration as MM:SS
+  String _formatDuration(int seconds) {
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
+  }
+
+  // Check permissions (reusing the method from MainScreen)
+  Future<bool> _checkPermissions() async {
+    final micStatus = await Permission.microphone.status;
+
+    if (micStatus.isGranted) return true;
+
+    final newMicStatus = await Permission.microphone.request();
+    return newMicStatus.isGranted;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            // Show transcribe animation when submitting
+            if (_isSubmitting &&
+                _transcribeLoaded &&
+                _transcribeArtboard != null)
+              Positioned.fill(
+                child: rive.Rive(
+                  artboard: _transcribeArtboard!,
+                  fit: BoxFit.contain,
+                ),
+              )
+            // Rive animation - centered and enlarged to full width
+            else if (_riveLoaded && _riveArtboard != null)
+              Align(
+                alignment: Alignment(0, -0.75), // Moves it up 20% from center
+                child: Container(
+                  width: screenWidth, // Use full screen width
+                  height: screenWidth, // Same height for aspect ratio
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      // Original artboard dimensions
+                      const originalWidth = 500.0;
+                      const originalHeight = 684.0;
+
+                      // Original touch area properties
+                      const touchAreaCenterX = 250.0;
+                      const touchAreaCenterY = 334.0;
+                      const touchAreaSize = 235.0;
+
+                      // Calculate scale factors for width and height
+                      final containerWidth = constraints.maxWidth;
+                      final containerHeight = constraints.maxHeight;
+
+                      // Calculate how the animation is actually scaled with BoxFit.cover
+                      double scaleX = containerWidth / originalWidth;
+                      double scaleY = containerHeight / originalHeight;
+
+                      // For BoxFit.cover, we use the larger scale factor
+                      final scale = scaleX > scaleY ? scaleX : scaleY;
+
+                      // Calculate the actual size of the Rive animation
+                      final actualWidth = originalWidth * scale;
+                      final actualHeight = originalHeight * scale;
+
+                      // Calculate position offsets if animation is centered
+                      final offsetX = (containerWidth - actualWidth) / 2;
+                      final offsetY = (containerHeight - actualHeight) / 2;
+
+                      // Calculate the scaled touch area position and size
+                      final scaledTouchAreaCenterX =
+                          touchAreaCenterX * scale + offsetX;
+                      final scaledTouchAreaCenterY =
+                          touchAreaCenterY * scale + offsetY;
+                      final scaledTouchAreaSize = touchAreaSize * scale;
+
+                      // Calculate the top-left position for Positioned widget
+                      final touchAreaLeft =
+                          scaledTouchAreaCenterX - scaledTouchAreaSize / 2;
+                      final touchAreaTop =
+                          scaledTouchAreaCenterY - scaledTouchAreaSize / 2;
+
+                      return Stack(
+                        children: [
+                          // The Rive animation
+                          rive.Rive(
+                            artboard: _riveArtboard!,
+                            antialiasing: true,
+                            useArtboardSize: false,
+                            fit: BoxFit
+                                .cover, // Keep your current BoxFit setting
+                          ),
+
+                          // GestureDetector precisely positioned over the touch area
+                          Positioned(
+                            left: touchAreaLeft,
+                            top: touchAreaTop,
+                            width: scaledTouchAreaSize,
+                            height: scaledTouchAreaSize,
+                            child: GestureDetector(
+                              onTapDown: (_) {
+                                if (!_isRecording && _clickInput != null) {
+                                  print('Mic touch area tapped!');
+                                  _clickInput!.value = true;
+
+                                  if (!_isRecording) {
+                                    // Ensure isPause is false
+                                    if (_isPauseInput != null) {
+                                      _isPauseInput!.value = false;
+                                    }
+                                    _startRecordingAudio();
+                                  }
+                                }
+                              },
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.transparent,
+                                  // Uncomment below for debugging to see touch area
+                                  // border: Border.all(color: Colors.red.withOpacity(0.3), width: 2),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              )
+            else
+              const Center(
+                child: CircularProgressIndicator(),
+              ),
+
+            // Content overlay - hide when submitting
+            if (!_isSubmitting)
+              Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Close button
+                    Align(
+                      alignment: Alignment.topRight,
+                      child: IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () {
+                          if (_isRecording) {
+                            _stopRecording(submit: false);
+                          } else {
+                            Navigator.pop(context);
+                          }
+                        },
+                      ),
+                    ),
+
+                    const Spacer(),
+
+                    // REC indicator with pulsing dot
+                    if (_isRecording)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            // Pulsing red dot (stops when paused)
+                            PulsingDot(isPaused: _isPaused),
+                            const SizedBox(width: 6),
+                            // REC text
+                            const Text(
+                              "REC",
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500, // Medium
+                                fontFamily: 'GeistMono',
+                                color: Colors.black,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    // Recording duration
+                    if (_isRecording)
+                      Text(
+                        _formatDuration(_recordingDuration),
+                        style: const TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'GeistMono',
+                          color: Colors.black,
+                        ),
+                      ),
+
+                    // Instruction text - not tappable anymore
+                    if (!_isRecording)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 170.0),
+                        child: IgnorePointer(
+                          ignoring: true, // Allow taps to pass through
+                          child: Text(
+                            'click to start recording',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                              fontFamily: 'Geist',
+                              color: Colors.black,
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    const SizedBox(height: 30),
+
+                    // Control buttons with SVG icons
+                    if (_isRecording)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // Pause/Play button
+                          GestureDetector(
+                            onTap: _pauseResumeRecording,
+                            child: Container(
+                              width: 64,
+                              height: 64,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 1),
+                              clipBehavior: Clip.antiAlias,
+                              decoration: ShapeDecoration(
+                                gradient: const LinearGradient(
+                                  begin: Alignment(-0.00, -0.00),
+                                  end: Alignment(1.00, 1.00),
+                                  colors: [
+                                    Color(0xFFC6C5C5),
+                                    Color.fromARGB(255, 158, 156, 156)
+                                  ],
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(120),
+                                ),
+                              ),
+                              child: Center(
+                                child: SvgPicture.asset(
+                                  _isPaused
+                                      ? 'assets/icons/play.svg'
+                                      : 'assets/icons/pause.svg',
+                                  width: 32,
+                                  height: 32,
+                                  colorFilter: const ColorFilter.mode(
+                                      Colors.white, BlendMode.srcIn),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(width: 24),
+
+                          // Stop button
+                          GestureDetector(
+                            onTap: () => _stopRecording(submit: false),
+                            child: Container(
+                              width: 64,
+                              height: 64,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 1),
+                              clipBehavior: Clip.antiAlias,
+                              decoration: ShapeDecoration(
+                                gradient: const LinearGradient(
+                                  begin: Alignment(-0.00, -0.00),
+                                  end: Alignment(1.00, 1.00),
+                                  colors: [
+                                    Color(0xFFFF5A5A),
+                                    Color.fromARGB(255, 210, 1, 1)
+                                  ],
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(120),
+                                ),
+                              ),
+                              child: Center(
+                                child: SvgPicture.asset(
+                                  'assets/icons/stop.svg',
+                                  width: 32,
+                                  height: 32,
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(width: 24),
+
+                          // Submit button
+                          GestureDetector(
+                            onTap: () => _stopRecording(submit: true),
+                            child: Container(
+                              width: 64,
+                              height: 64,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 1),
+                              clipBehavior: Clip.antiAlias,
+                              decoration: ShapeDecoration(
+                                gradient: const LinearGradient(
+                                  begin: Alignment(-0.00, -0.00),
+                                  end: Alignment(1.00, 1.00),
+                                  colors: [
+                                    Color(0xFF00FF72),
+                                    Color(0xFF00CD5C)
+                                  ],
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(120),
+                                ),
+                              ),
+                              child: Center(
+                                child: SvgPicture.asset(
+                                  'assets/icons/submit.svg',
+                                  width: 32,
+                                  height: 32,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                    // Add spacing to position buttons 200px from bottom
+                    const SizedBox(height: 200),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Add PulsingDot class at the end of the file
+class PulsingDot extends StatefulWidget {
+  const PulsingDot({Key? key, this.isPaused = false}) : super(key: key);
+
+  @override
+  State<PulsingDot> createState() => _PulsingDotState();
+
+  final bool isPaused;
+}
+
+class _PulsingDotState extends State<PulsingDot>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _animationController;
+  late Animation<double> _opacityAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
+
+    _opacityAnimation =
+        Tween<double>(begin: 1.0, end: 0.4).animate(_animationController);
+
+    // Initialize with correct state
+    if (widget.isPaused) {
+      _animationController.stop();
+    }
+  }
+
+  @override
+  void didUpdateWidget(PulsingDot oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Pause or resume animation based on isPaused state
+    if (widget.isPaused && _animationController.isAnimating) {
+      _animationController.stop();
+    } else if (!widget.isPaused && !_animationController.isAnimating) {
+      _animationController.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animationController,
+      builder: (context, child) {
+        return Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(
+            color: Colors.red.withOpacity(_opacityAnimation.value),
+            shape: BoxShape.circle,
+          ),
+        );
+      },
+    );
+  }
+}
+
+// Add this class near the end of the file
+class RiveAnimationFullscreen extends StatefulWidget {
+  final String animationPath;
+  final String? message; // Make message optional
+
+  const RiveAnimationFullscreen({
+    Key? key,
+    required this.animationPath,
+    this.message, // Optional parameter
+  }) : super(key: key);
+
+  @override
+  _RiveAnimationFullscreenState createState() =>
+      _RiveAnimationFullscreenState();
+}
+
+class _RiveAnimationFullscreenState extends State<RiveAnimationFullscreen>
+    with SingleTickerProviderStateMixin {
+  rive.Artboard? _riveArtboard;
+  bool _isLoaded = false;
+  rive.StateMachineController? _controller;
+  late AnimationController _fadeController;
+  late Animation<double> _fadeAnimation;
+  String? _currentAnimationPath;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Setup fade animation
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400), // Faster fade in
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+        CurvedAnimation(parent: _fadeController, curve: Curves.easeInOut));
+    _fadeController.forward();
+
+    _loadRiveAnimation();
+  }
+
+  @override
+  void didUpdateWidget(RiveAnimationFullscreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // If animation path changed, reload the animation
+    if (widget.animationPath != oldWidget.animationPath) {
+      print(
+          'Animation path changed from ${oldWidget.animationPath} to ${widget.animationPath}');
+      // Reset state
+      setState(() {
+        _isLoaded = false;
+        _riveArtboard = null;
+        _controller?.dispose();
+        _controller = null;
+      });
+
+      // Reload with new animation
+      _loadRiveAnimation();
+
+      // Reset and restart fade animation
+      _fadeController.reset();
+      _fadeController.forward();
+    }
+  }
+
+  void _loadRiveAnimation() async {
+    _currentAnimationPath = widget.animationPath;
+    final loadingPath = _currentAnimationPath;
+
+    try {
+      print('Loading Rive animation from ${widget.animationPath}');
+
+      // Load the Rive file
+      final data = await rootBundle.load(widget.animationPath);
+      print('Rive file loaded, size: ${data.lengthInBytes} bytes');
+
+      // Check if widget was disposed or animation path changed during loading
+      if (!mounted || loadingPath != _currentAnimationPath) {
+        print('Widget disposed or animation changed during loading');
+        return;
+      }
+
+      final file = rive.RiveFile.import(data);
+      print('Rive file imported successfully');
+
+      // Get available artboards for debugging
+      print('Available artboards:');
+      for (final artboard in file.artboards) {
+        print(' - ${artboard.name}');
+      }
+
+      // Setup the artboard - use the main artboard
+      final artboard = file.mainArtboard;
+      print('Using artboard: ${artboard.name}');
+
+      // Setup Rive artboard with state machine if available
+      var controller = rive.StateMachineController.fromArtboard(
+        artboard,
+        'State Machine 1', // Try standard state machine name
+      );
+
+      if (controller != null) {
+        print('State machine controller found');
+        artboard.addController(controller);
+        _controller = controller;
+      } else {
+        print('No state machine controller found, using simple animation');
+
+        // If no state machine, try to play a simple animation if available
+        if (artboard.animations.isNotEmpty) {
+          print('Found ${artboard.animations.length} animations');
+          print('Playing animation: ${artboard.animations.first.name}');
+          artboard.addController(
+              rive.SimpleAnimation(artboard.animations.first.name));
+        }
+      }
+
+      if (mounted && loadingPath == _currentAnimationPath) {
+        setState(() {
+          _riveArtboard = artboard;
+          _isLoaded = true;
+        });
+        print('Rive animation loaded successfully');
+      }
+    } catch (error) {
+      print('Error loading Rive animation: $error');
+      // Prevent state update if widget was disposed during loading
+      if (mounted && loadingPath == _currentAnimationPath) {
+        setState(() {
+          _isLoaded = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _fadeController.dispose();
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: Container(
+        color: Colors.white,
+        width: double.infinity,
+        height: double.infinity,
+        child: _isLoaded && _riveArtboard != null
+            ? rive.Rive(
+                artboard: _riveArtboard!,
+                fit: BoxFit.contain,
+              )
+            : Center(
+                child: CircularProgressIndicator(),
+              ),
+      ),
+    );
+  }
+}
+
+// Create a new animation controller class that holds all animations
+class AnimationSequenceController extends StatefulWidget {
+  const AnimationSequenceController({Key? key}) : super(key: key);
+
+  @override
+  _AnimationSequenceControllerState createState() =>
+      _AnimationSequenceControllerState();
+}
+
+class _AnimationSequenceControllerState
+    extends State<AnimationSequenceController>
+    with SingleTickerProviderStateMixin {
+  // Keep track of which animation is currently showing
+  String _currentAnimation = 'transcribe';
+  String _previousAnimation = ''; // Track previous animation for crossfade
+
+  // Store loaded Rive artboards for each animation
+  rive.Artboard? _transcribeArtboard;
+  rive.Artboard? _understandArtboard;
+  rive.Artboard? _extractArtboard;
+
+  // Track loading state for each animation
+  bool _transcribeLoaded = false;
+  bool _understandLoaded = false;
+  bool _extractLoaded = false;
+
+  // Controllers for the animations
+  rive.StateMachineController? _transcribeController;
+  rive.StateMachineController? _understandController;
+  rive.StateMachineController? _extractController;
+
+  // For cross-fade animations
+  AnimationController? _fadeController;
+  Animation<double>? _fadeInAnimation;
+  Animation<double>? _fadeOutAnimation;
+  double _currentOpacity = 1.0;
+  double _previousOpacity = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Set up fade controller
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+
+    _fadeInAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _fadeController!,
+        curve: Interval(0.0, 1.0, curve: Curves.easeInOut),
+      ),
+    );
+
+    _fadeOutAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(
+        parent: _fadeController!,
+        curve: Interval(0.0, 0.7, curve: Curves.easeInOut),
+      ),
+    );
+
+    _fadeController!.addListener(() {
+      if (mounted) {
+        setState(() {
+          _currentOpacity = _fadeInAnimation!.value;
+          _previousOpacity = _fadeOutAnimation!.value;
+        });
+      }
+    });
+
+    // Load all animations at startup
+    _loadAllAnimations();
+  }
+
+  void _loadAllAnimations() async {
+    await _loadRiveAnimation('transcribe', 'assets/animations/transcribe.riv');
+    await _loadRiveAnimation('understand', 'assets/animations/understand.riv');
+    await _loadRiveAnimation('extract', 'assets/animations/extract.riv');
+  }
+
+  Future<void> _loadRiveAnimation(String name, String path) async {
+    try {
+      print('Loading Rive animation $name from $path');
+
+      // Load the file data
+      final data = await rootBundle.load(path);
+      final file = rive.RiveFile.import(data);
+
+      // Get the main artboard
+      final artboard = file.mainArtboard;
+
+      // Setup state machine if available
+      rive.StateMachineController? controller =
+          rive.StateMachineController.fromArtboard(artboard, 'State Machine 1');
+
+      if (controller != null) {
+        artboard.addController(controller);
+      } else if (artboard.animations.isNotEmpty) {
+        artboard.addController(
+            rive.SimpleAnimation(artboard.animations.first.name));
+      }
+
+      // Update the state for the specific animation
+      if (mounted) {
+        setState(() {
+          if (name == 'transcribe') {
+            _transcribeArtboard = artboard;
+            _transcribeController = controller;
+            _transcribeLoaded = true;
+          } else if (name == 'understand') {
+            _understandArtboard = artboard;
+            _understandController = controller;
+            _understandLoaded = true;
+          } else if (name == 'extract') {
+            _extractArtboard = artboard;
+            _extractController = controller;
+            _extractLoaded = true;
+          }
+        });
+      }
+
+      print('Rive animation $name loaded successfully');
+    } catch (e) {
+      print('Error loading Rive animation $name: $e');
+    }
+  }
+
+  // Change which animation is currently showing
+  void showAnimation(String animationName) {
+    if (_currentAnimation != animationName) {
+      _fadeController!.reset();
+
+      setState(() {
+        _previousAnimation = _currentAnimation;
+        _currentAnimation = animationName;
+      });
+
+      _fadeController!.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    // Clean up all controllers
+    _fadeController?.dispose();
+    _transcribeController?.dispose();
+    _understandController?.dispose();
+    _extractController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Current animation widget
+    Widget? currentAnimationWidget;
+    if (_currentAnimation == 'transcribe' &&
+        _transcribeLoaded &&
+        _transcribeArtboard != null) {
+      currentAnimationWidget = Opacity(
+        opacity: _currentOpacity,
+        child: rive.Rive(
+          artboard: _transcribeArtboard!,
+          fit: BoxFit.contain,
+        ),
+      );
+    } else if (_currentAnimation == 'understand' &&
+        _understandLoaded &&
+        _understandArtboard != null) {
+      currentAnimationWidget = Opacity(
+        opacity: _currentOpacity,
+        child: rive.Rive(
+          artboard: _understandArtboard!,
+          fit: BoxFit.contain,
+        ),
+      );
+    } else if (_currentAnimation == 'extract' &&
+        _extractLoaded &&
+        _extractArtboard != null) {
+      currentAnimationWidget = Opacity(
+        opacity: _currentOpacity,
+        child: rive.Rive(
+          artboard: _extractArtboard!,
+          fit: BoxFit.contain,
+        ),
+      );
+    }
+
+    // Previous animation widget (for crossfade)
+    Widget? previousAnimationWidget;
+    if (_previousAnimation == 'transcribe' &&
+        _transcribeLoaded &&
+        _transcribeArtboard != null) {
+      previousAnimationWidget = Opacity(
+        opacity: _previousOpacity,
+        child: rive.Rive(
+          artboard: _transcribeArtboard!,
+          fit: BoxFit.contain,
+        ),
+      );
+    } else if (_previousAnimation == 'understand' &&
+        _understandLoaded &&
+        _understandArtboard != null) {
+      previousAnimationWidget = Opacity(
+        opacity: _previousOpacity,
+        child: rive.Rive(
+          artboard: _understandArtboard!,
+          fit: BoxFit.contain,
+        ),
+      );
+    } else if (_previousAnimation == 'extract' &&
+        _extractLoaded &&
+        _extractArtboard != null) {
+      previousAnimationWidget = Opacity(
+        opacity: _previousOpacity,
+        child: rive.Rive(
+          artboard: _extractArtboard!,
+          fit: BoxFit.contain,
+        ),
+      );
+    }
+
+    // Return the container with crossfading animations
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: Colors.white,
+      child: Stack(
+        children: [
+          if (previousAnimationWidget != null) previousAnimationWidget,
+          if (currentAnimationWidget != null) currentAnimationWidget,
+          if (currentAnimationWidget == null && previousAnimationWidget == null)
+            Center(child: CircularProgressIndicator()),
+        ],
+      ),
+    );
   }
 }

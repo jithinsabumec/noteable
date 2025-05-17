@@ -40,6 +40,7 @@ dependencies:
   http: ^1.2.0
   flutter_svg: ^2.0.9
   device_info_plus: ^9.1.2
+  rive: ^0.13.20
   
   # Local storage
   hive: ^2.2.3
@@ -123,3 +124,4 @@ flutter:
 
   assets:
     - assets/icons/
+    - assets/animations/

@@ -1,0 +1,49 @@
+                  // Control buttons
+                  if (_isRecording)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // Pause button
+                        CircleAvatar(
+                          radius: 38,
+                          backgroundColor: Colors.grey.shade200,
+                          child: IconButton(
+                            icon: Icon(
+                                _isPaused ? Icons.play_arrow : Icons.pause),
+                            iconSize: 38,
+                            color: Colors.grey.shade700,
+                            onPressed: _pauseResumeRecording,
+                          ),
+                        ),
+
+                        const SizedBox(width: 24),
+
+                        // Stop button
+                        CircleAvatar(
+                          radius: 38,
+                          backgroundColor: Colors.grey.shade200,
+                          child: IconButton(
+                            icon: const Icon(Icons.stop),
+                            iconSize: 38,
+                            color: Colors.grey.shade700,
+                            onPressed: () => _stopRecording(submit: false),
+                          ),
+                        ),
+
+                        const SizedBox(width: 24),
+
+                        // Submit button (tick icon)
+                        CircleAvatar(
+                          radius: 38,
+                          backgroundColor: Colors.black,
+                          child: IconButton(
+                            icon: const Icon(Icons.check),
+                            iconSize: 38,
+                            color: Colors.white,
+                            onPressed: () => _stopRecording(submit: true),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                  // Control buttons with SVG icons
