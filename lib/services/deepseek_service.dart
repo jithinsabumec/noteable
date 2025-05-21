@@ -53,7 +53,6 @@ class DeepseekService {
             'Failed to analyze text: ${response.statusCode}, ${response.body}');
       }
     } catch (e) {
-      print('Error analyzing transcription: $e');
       return {'notes': [], 'tasks': []};
     }
   }

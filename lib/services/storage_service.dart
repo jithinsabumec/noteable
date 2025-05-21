@@ -1,7 +1,11 @@
+// ignore_for_file: empty_catches, duplicate_ignore
+
 import 'dart:math';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/timeline_entry.dart';
+import '../models/item_type_model.dart';
+import '../models/task_item_model.dart';
 
 class StorageService {
   static const String entriesBoxName = 'timeline_entries';
@@ -20,6 +24,9 @@ class StorageService {
     // Register adapters
     Hive.registerAdapter(TimelineEntryAdapter());
     Hive.registerAdapter(EntryTypeAdapter());
+    Hive.registerAdapter(ItemTypeModelAdapter());
+    Hive.registerAdapter(TimelineItemRefModelAdapter());
+    Hive.registerAdapter(TaskItemModelAdapter());
 
     // Open box
     _entriesBox = await Hive.openBox<TimelineEntry>(entriesBoxName);
@@ -31,16 +38,12 @@ class StorageService {
       await _entriesBox.put(entry.id, entry);
       // Verify entry was saved
       final saved = _entriesBox.get(entry.id);
-      if (saved == null) {
-        print('Warning: Entry with ID ${entry.id} was not saved properly');
-      }
+      if (saved == null) {}
     } catch (e) {
-      print('Error saving entry: $e');
       // Attempt to save again with a retry
       try {
         await _entriesBox.put(entry.id, entry);
       } catch (e) {
-        print('Fatal error saving entry: $e');
         // In a production app, you might want to log this to an error reporting service
       }
     }
@@ -51,13 +54,11 @@ class StorageService {
     try {
       await _entriesBox.put(entry.id, entry);
     } catch (e) {
-      print('Error updating entry: $e');
       // Attempt to update again with a retry
       try {
         await _entriesBox.put(entry.id, entry);
-      } catch (e) {
-        print('Fatal error updating entry: $e');
-      }
+        // ignore: empty_catches
+      } catch (e) {}
     }
   }
 
@@ -65,17 +66,13 @@ class StorageService {
   Future<void> deleteEntry(String id) async {
     try {
       await _entriesBox.delete(id);
-    } catch (e) {
-      print('Error deleting entry: $e');
-    }
+    } catch (e) {}
   }
 
   // Get all entries for a specific date
   List<TimelineEntry> getEntriesForDate(DateTime date) {
     try {
       final startOfDay = DateTime(date.year, date.month, date.day);
-      final endOfDay =
-          DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
 
       return _entriesBox.values.where((entry) {
         final entryDate = DateTime(
@@ -85,7 +82,6 @@ class StorageService {
             entryDate.day == startOfDay.day;
       }).toList();
     } catch (e) {
-      print('Error retrieving entries for date: $e');
       return [];
     }
   }

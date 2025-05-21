@@ -1,3 +1,5 @@
+// ignore_for_file: unused_field, unused_local_variable, library_private_types_in_public_api, empty_catches, unused_element, non_constant_identifier_names, use_build_context_synchronously, deprecated_member_use, duplicate_ignore
+
 import 'package:flutter/material.dart';
 import 'package:record/record.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -9,7 +11,6 @@ import 'dart:math'; // Import for Random and sqrt
 import 'dart:async'; // Import for Timer
 import 'config.dart';
 import 'services/deepseek_service.dart';
-import 'dart:async';
 import 'dart:math' as math;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'time_icons.dart';
@@ -18,8 +19,14 @@ import 'package:noteable/models/timeline_entry.dart' as models;
 import 'package:flutter_svg/flutter_svg.dart'; // Add this import
 import 'package:rive/rive.dart' as rive; // Import Rive with an alias
 import 'package:flutter/services.dart'; // Import for rootBundle
-import 'package:flutter/rendering.dart'; // Import for RepaintBoundary
-import 'package:flutter/widgets.dart'; // Import for FlutterView
+// Import for RepaintBoundary
+// Import for FlutterView
+import 'package:firebase_core/firebase_core.dart'; // Import Firebase Core
+import 'firebase_options.dart'; // Import Firebase options
+import 'screens/auth_wrapper.dart'; // Import AuthWrapper
+// ignore: unused_import
+import 'services/auth_service.dart'; // Import AuthService
+import 'widgets/rive_checkbox.dart'; // Import the RiveCheckbox widget
 
 // Add a GlobalKey to keep track of the MainScreen state
 final mainScreenKey = GlobalKey<_MainScreenState>();
@@ -27,6 +34,11 @@ final mainScreenKey = GlobalKey<_MainScreenState>();
 void main() async {
   // Ensure Flutter is properly initialized with all bindings
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   // Initialize Rive
   await rive.RiveFile.initialize();
@@ -48,7 +60,9 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         fontFamily: 'Geist',
       ),
-      home: MainScreen(key: mainScreenKey),
+      home: AuthWrapper(
+        child: MainScreen(key: mainScreenKey),
+      ),
     );
   }
 }
@@ -99,13 +113,28 @@ class _MainScreenState extends State<MainScreen>
   // Map to store entries by timestamp for the currently selected date
   final Map<String, List<TimelineEntry>> _timelineEntriesByDate = {};
 
-  List<FocusNode> _sheetFocusNodes =
+  final List<FocusNode> _sheetFocusNodes =
       []; // Moved here to be accessible for disposal
 
   // Add a PageController for horizontal sliding between weeks
   late PageController _pageController;
   final int _initialPage =
       1000; // Start at a high number to allow going back in time
+
+  // Add a variable to track previously selected date
+  DateTime? _previouslySelectedDate;
+
+  // Add this new instance variable to track the currently selected page
+  late int _currentSelectedPage;
+
+  // Map to store RiveCheckboxControllers for each task item
+  final Map<String, RiveCheckboxController> _taskCheckboxControllers = {};
+
+  // Helper to get or create a RiveCheckboxController for a task
+  RiveCheckboxController _getTaskCheckboxController(String storageId) {
+    return _taskCheckboxControllers.putIfAbsent(
+        storageId, () => RiveCheckboxController());
+  }
 
   @override
   void initState() {
@@ -115,10 +144,17 @@ class _MainScreenState extends State<MainScreen>
       initialPage: _initialPage,
       viewportFraction: 1.0,
     );
+
+    // Initialize the current selected page
+    _currentSelectedPage = _initialPage;
+
     // Clear any placeholder data (run this only once when testing)
     _clearPlaceholderData();
     // Load entries for the current date
     _loadEntriesForSelectedDate();
+
+    // Store initial selected date
+    _previouslySelectedDate = _selectedDate;
 
     // Preload all Rive animations to avoid delays
     _preloadRiveAnimations();
@@ -127,7 +163,6 @@ class _MainScreenState extends State<MainScreen>
   // Preload Rive animations
   Future<void> _preloadRiveAnimations() async {
     try {
-      print('Preloading Rive animations');
       // List of animations to preload
       final animations = [
         'assets/animations/transcribe.riv',
@@ -138,19 +173,11 @@ class _MainScreenState extends State<MainScreen>
       // Load each animation in parallel
       await Future.wait(animations.map((path) async {
         try {
-          print('Preloading: $path');
           final data = await rootBundle.load(path);
           final file = rive.RiveFile.import(data);
-          print('Preloaded: $path');
-        } catch (e) {
-          print('Error preloading Rive animation $path: $e');
-        }
+        } catch (e) {}
       }));
-
-      print('All Rive animations preloaded');
-    } catch (e) {
-      print('Error in preloading Rive animations: $e');
-    }
+    } catch (e) {}
   }
 
   @override
@@ -161,8 +188,20 @@ class _MainScreenState extends State<MainScreen>
       node.dispose();
     }
     _sheetFocusNodes.clear();
-    _animationSequenceTimer?.cancel(); // Cancel animation sequence timer
-    _pageController.dispose(); // Dispose the PageController
+
+    // Cancel animation sequence timer and reset states
+    _animationSequenceTimer?.cancel();
+    _animationSequenceTimer = null;
+    _showAnimations = false;
+    _isTranscribing = false;
+    _isUnderstanding = false;
+    _isAnalyzing = false;
+
+    // Cancel any pending page animations
+    if (_pageController.hasClients) {
+      _pageController.dispose();
+    }
+
     super.dispose();
   }
 
@@ -173,114 +212,67 @@ class _MainScreenState extends State<MainScreen>
 
   // Load entries for the selected date
   Future<void> _loadEntriesForSelectedDate() async {
-    final entries = _storageService.getEntriesForDate(_selectedDate);
+    // Don't modify page selection here - we'll handle it in the date selection
+    final List<models.TimelineEntry> sEntries =
+        _storageService.getEntriesForDate(_selectedDate);
+    // Sort entries by timestamp to ensure consistent order if multiple items share the same UI timestamp string
+    sEntries.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
     setState(() {
-      // Group entries by timestamp for display
+      // Clear existing entries before repopulating
       _timelineEntriesByDate.clear();
 
-      // Convert each entry to UI TimelineEntry
-      for (final entry in entries) {
-        final timestamp = entry.timeString;
-        final isDaytime = _isTimestamp24HourDaytime(entry.timestamp);
+      // Temporary map to build UI entries
+      Map<String, TimelineEntry> tempUiEntries = {};
 
-        if (entry.type == models.EntryType.note) {
-          // Handle notes
-          if (!_timelineEntriesByDate.containsKey(timestamp)) {
-            final newUiEntry = TimelineEntry(
-              timestamp: timestamp,
-              isDaytime: isDaytime,
-              notes: [entry.content],
-              tasks: [],
-              itemOrder: [], // Initialize empty
-            );
-            newUiEntry.itemOrder.add(TimelineItemRef(
-                type: ItemType.note, index: 0)); // Add ref for the note
-            _timelineEntriesByDate[timestamp] = [newUiEntry];
-          } else {
-            // Find appropriate entry or create new one
-            bool found = false;
-            for (var uiEntry in _timelineEntriesByDate[timestamp]!) {
-              // Add note to the list and update itemOrder
-              final newNoteIndex = uiEntry.notes.length;
-              uiEntry.notes.add(entry.content);
-              uiEntry.itemOrder.add(
-                  TimelineItemRef(type: ItemType.note, index: newNoteIndex));
-              found = true;
-              break;
-            }
+      for (final S_entry in sEntries) {
+        final String uiTimestamp = S_entry.timeString; // e.g., "10:00 AM"
+        final bool isDaytime = _isTimestamp24HourDaytime(S_entry.timestamp);
 
-            if (!found) {
-              _timelineEntriesByDate[timestamp]!.add(TimelineEntry(
-                timestamp: timestamp,
-                isDaytime: isDaytime,
-                notes: [entry.content],
-                tasks: [],
-                itemOrder: [], // Initialize empty
-              ));
-              _timelineEntriesByDate[timestamp]!.last.itemOrder.add(
-                  TimelineItemRef(
-                      type: ItemType.note, index: 0)); // Add ref for the note
-            }
-          }
+        // Get or create the UI TimelineEntry for this uiTimestamp
+        TimelineEntry uiEntry = tempUiEntries.putIfAbsent(uiTimestamp, () {
+          return TimelineEntry(
+            timestamp: uiTimestamp,
+            isDaytime: isDaytime,
+            notes: [],
+            tasks: [],
+            itemOrder: [],
+          );
+        });
+
+        if (S_entry.type == models.EntryType.note) {
+          final newNoteIndex = uiEntry.notes.length;
+          uiEntry.notes.add(S_entry.content);
+          uiEntry.itemOrder.add(TimelineItemRef(
+            type: ItemType.note,
+            index: newNoteIndex,
+            storageId: S_entry.id, // Store the original ID
+          ));
         } else {
-          // Handle tasks
-          if (!_timelineEntriesByDate.containsKey(timestamp)) {
-            _timelineEntriesByDate[timestamp] = [
-              TimelineEntry(
-                timestamp: timestamp,
-                isDaytime: isDaytime,
-                notes: [],
-                tasks: [
-                  TaskItem(
-                    task: entry.content,
-                    completed: entry.completed,
-                  ),
-                ],
-                itemOrder: [], // Initialize empty
-              )
-            ];
-            _timelineEntriesByDate[timestamp]!.first.itemOrder.add(
-                TimelineItemRef(
-                    type: ItemType.task, index: 0)); // Add ref for the task
-          } else {
-            // Find appropriate entry or create new one
-            bool found = false;
-            for (var uiEntry in _timelineEntriesByDate[timestamp]!) {
-              // Add task to the list and update itemOrder
-              final newTaskIndex = uiEntry.tasks.length;
-              uiEntry.tasks.add(
-                TaskItem(
-                  task: entry.content,
-                  completed: entry.completed,
-                ),
-              );
-              uiEntry.itemOrder.add(
-                  TimelineItemRef(type: ItemType.task, index: newTaskIndex));
-              found = true;
-              break;
-            }
-
-            if (!found) {
-              _timelineEntriesByDate[timestamp]!.add(TimelineEntry(
-                timestamp: timestamp,
-                isDaytime: isDaytime,
-                notes: [],
-                tasks: [
-                  TaskItem(
-                    task: entry.content,
-                    completed: entry.completed,
-                  ),
-                ],
-                itemOrder: [], // Initialize empty
-              ));
-              _timelineEntriesByDate[timestamp]!.last.itemOrder.add(
-                  TimelineItemRef(
-                      type: ItemType.task, index: 0)); // Add ref for the task
-            }
-          }
+          // Task
+          final newTaskIndex = uiEntry.tasks.length;
+          uiEntry.tasks.add(TaskItem(
+            task: S_entry.content,
+            completed: S_entry.completed,
+          ));
+          uiEntry.itemOrder.add(TimelineItemRef(
+            type: ItemType.task,
+            index: newTaskIndex,
+            storageId: S_entry.id, // Store the original ID
+          ));
         }
       }
+
+      // Convert the temporary map to the final structure and update the UI
+      _timelineEntriesByDate
+          .addAll(tempUiEntries.map((key, value) => MapEntry(key, [value])));
+
+      // Update previous date tracker
+      _previouslySelectedDate = _selectedDate;
     });
+
+    // Debug print to verify entries are loaded
+    debugPrint('Loaded ${sEntries.length} entries for $_selectedDate');
   }
 
   // Helper method to check if a timestamp is during the day or night (24-hour format)
@@ -338,6 +330,7 @@ class _MainScreenState extends State<MainScreen>
             false;
 
         if (!shouldRequest) {
+          // ignore: use_build_context_synchronously
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content:
@@ -386,7 +379,6 @@ class _MainScreenState extends State<MainScreen>
       // Return true if all permissions granted
       return newMicStatus.isGranted && newStorageStatus.isGranted;
     } catch (e) {
-      print('Error requesting permissions: $e');
       // If there's an error, return false but don't crash
       return false;
     }
@@ -394,7 +386,6 @@ class _MainScreenState extends State<MainScreen>
 
   // Add a new recording directly
   void _startRecording() async {
-    print("_startRecording called - Opening recording page");
     _toggleFabExpanded(); // Close the menu
 
     // Prepare for seamless transition by setting up states
@@ -411,7 +402,7 @@ class _MainScreenState extends State<MainScreen>
       context,
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) =>
-            RecordingPage(),
+            const RecordingPage(),
         transitionDuration: const Duration(milliseconds: 300),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(
@@ -440,10 +431,8 @@ class _MainScreenState extends State<MainScreen>
         _animationController.currentState!.showAnimation('transcribe');
       }
 
-      print("Recording completed - Continuing animation sequence");
-
       // Start the animation sequence with a small delay to ensure smooth transition
-      await Future.delayed(Duration(milliseconds: 50));
+      await Future.delayed(const Duration(milliseconds: 50));
       _startProcessingAnimationSequence("");
 
       // Start actual transcription in the background
@@ -466,8 +455,6 @@ class _MainScreenState extends State<MainScreen>
     // If _MainScreenState initiated a recording that it needs to pause via its own _audioRecorder instance,
     // it should do so here. However, the primary recording flow seems to have moved to RecordingPage.
     // For now, we'll ensure it doesn't crash due to _clickInput.
-    print(
-        "_MainScreenState._pauseRecording called. Current recording logic primarily in RecordingPage.");
     try {
       // Example: if _MainScreenState still had its own recording session it could manage
       // This is a placeholder, as the main recording is in RecordingPage
@@ -475,17 +462,12 @@ class _MainScreenState extends State<MainScreen>
           await _audioRecorder.isPaused()) {
         if (_isPaused) {
           // await _audioRecorder.resume(); // If _MainScreenState's recorder was active
-          print(
-              "_MainScreenState: Attempting to resume its own recorder (if any).");
         } else {
           // await _audioRecorder.pause(); // If _MainScreenState's recorder was active
-          print(
-              "_MainScreenState: Attempting to pause its own recorder (if any).");
         }
         // setState(() => _isPaused = !_isPaused); // Update _MainScreenState's own _isPaused
       }
     } catch (e) {
-      print('_MainScreenState: Error in _pauseRecording: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -502,8 +484,9 @@ class _MainScreenState extends State<MainScreen>
     // Cancel any existing timer first
     _animationSequenceTimer?.cancel();
 
-    // Show animations and set the first animation type - don't need setState here
-    // as the state should already be set correctly from _startRecording
+    if (!mounted) return;
+
+    // Show animations and set the first animation type
     if (!_showAnimations) {
       setState(() {
         _showAnimations = true;
@@ -513,9 +496,6 @@ class _MainScreenState extends State<MainScreen>
       });
     }
 
-    print(
-        "Starting/continuing animation sequence: transcribe -> understand -> extract");
-
     // Start with the transcribe animation if not already showing
     if (_animationController.currentState != null) {
       _animationController.currentState!.showAnimation('transcribe');
@@ -524,45 +504,47 @@ class _MainScreenState extends State<MainScreen>
     // Start a sequence of timers for the animations
     // First 5 seconds: Transcribing (this animation is already showing from RecordingPage)
     _animationSequenceTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted) {
-        print("Animation transition: transcribe -> understand");
+      if (!mounted) {
+        _animationSequenceTimer?.cancel();
+        return;
+      }
+
+      // Update the state for compatibility
+      setState(() {
+        _isTranscribing = false;
+        _isUnderstanding = true;
+        _isAnalyzing = false;
+      });
+
+      // Show the understand animation without any fade
+      if (_animationController.currentState != null) {
+        _animationController.currentState!.showAnimation('understand');
+      }
+
+      // Next 5 seconds: Understanding
+      _animationSequenceTimer = Timer(const Duration(seconds: 5), () {
+        if (!mounted) {
+          _animationSequenceTimer?.cancel();
+          return;
+        }
 
         // Update the state for compatibility
         setState(() {
           _isTranscribing = false;
-          _isUnderstanding = true;
-          _isAnalyzing = false;
+          _isUnderstanding = false;
+          _isAnalyzing = true;
         });
 
-        // Show the understand animation without any fade
+        // Show the extract animation without any fade
         if (_animationController.currentState != null) {
-          _animationController.currentState!.showAnimation('understand');
+          _animationController.currentState!.showAnimation('extract');
         }
 
-        // Next 5 seconds: Understanding
-        _animationSequenceTimer = Timer(const Duration(seconds: 5), () {
-          if (mounted) {
-            print("Animation transition: understand -> extract");
-
-            // Update the state for compatibility
-            setState(() {
-              _isTranscribing = false;
-              _isUnderstanding = false;
-              _isAnalyzing = true;
-            });
-
-            // Show the extract animation without any fade
-            if (_animationController.currentState != null) {
-              _animationController.currentState!.showAnimation('extract');
-            }
-
-            // Start the actual processing - use the most recent transcribed text
-            // rather than the original text passed to this method
-            _performActualTextProcessing(
-                _transcribedText.isNotEmpty ? _transcribedText : text);
-          }
-        });
-      }
+        // Start the actual processing - use the most recent transcribed text
+        // rather than the original text passed to this method
+        _performActualTextProcessing(
+            _transcribedText.isNotEmpty ? _transcribedText : text);
+      });
     });
   }
 
@@ -611,14 +593,15 @@ class _MainScreenState extends State<MainScreen>
       if (result['notes'] != null && result['notes'].isNotEmpty) {
         for (final note in result['notes']) {
           final storageEntry = models.TimelineEntry(
-            id: _storageService.generateId(),
+            id: _storageService.generateId(), // Generate ID here
             content: note,
             timestamp: now, // Use exact now with time
             type: models.EntryType.note,
             completed: false,
           );
           await _storageService.saveEntry(storageEntry);
-          createdStorageEntries.add(storageEntry);
+          createdStorageEntries
+              .add(storageEntry); // Add to list for later UI use
         }
       }
 
@@ -626,14 +609,15 @@ class _MainScreenState extends State<MainScreen>
       if (result['tasks'] != null && result['tasks'].isNotEmpty) {
         for (final task in result['tasks']) {
           final storageEntry = models.TimelineEntry(
-            id: _storageService.generateId(),
+            id: _storageService.generateId(), // Generate ID here
             content: task,
             timestamp: now, // Use exact now with time
             type: models.EntryType.task,
             completed: false,
           );
           await _storageService.saveEntry(storageEntry);
-          createdStorageEntries.add(storageEntry);
+          createdStorageEntries
+              .add(storageEntry); // Add to list for later UI use
         }
       }
 
@@ -663,20 +647,29 @@ class _MainScreenState extends State<MainScreen>
           // Get the first (and usually only) entry for this timestamp
           final uiEntry = _timelineEntriesByDate[timestamp]!.first;
 
-          // Add notes to UI entry
-          int noteStartIndex = uiEntry.notes.length;
-          for (int i = 0; i < notes.length; i++) {
-            uiEntry.notes.add(notes[i]);
-            uiEntry.itemOrder.add(TimelineItemRef(
-                type: ItemType.note, index: noteStartIndex + i));
-          }
-
-          // Add tasks to UI entry
-          int taskStartIndex = uiEntry.tasks.length;
-          for (int i = 0; i < tasks.length; i++) {
-            uiEntry.tasks.add(tasks[i]);
-            uiEntry.itemOrder.add(TimelineItemRef(
-                type: ItemType.task, index: taskStartIndex + i));
+          // Iterate over createdStorageEntries to add them to the UI
+          for (final S_entry in createdStorageEntries) {
+            if (S_entry.type == models.EntryType.note) {
+              final newNoteIndex = uiEntry.notes.length;
+              uiEntry.notes.add(S_entry.content);
+              uiEntry.itemOrder.add(TimelineItemRef(
+                type: ItemType.note,
+                index: newNoteIndex,
+                storageId: S_entry.id, // Use the ID from the saved entry
+              ));
+            } else {
+              // Task
+              final newTaskIndex = uiEntry.tasks.length;
+              uiEntry.tasks.add(TaskItem(
+                task: S_entry.content,
+                completed: S_entry.completed,
+              ));
+              uiEntry.itemOrder.add(TimelineItemRef(
+                type: ItemType.task,
+                index: newTaskIndex,
+                storageId: S_entry.id, // Use the ID from the saved entry
+              ));
+            }
           }
         }
 
@@ -690,8 +683,8 @@ class _MainScreenState extends State<MainScreen>
         // Show option to navigate to today if we're on a different date
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Insights saved to today\'s date'),
-            duration: Duration(seconds: 3),
+            content: const Text('Insights saved to today\'s date'),
+            duration: const Duration(seconds: 3),
             action: SnackBarAction(
               label: 'View Today',
               onPressed: () {
@@ -717,7 +710,6 @@ class _MainScreenState extends State<MainScreen>
         );
       }
     } catch (e) {
-      print('Error analyzing with DeepSeek: $e');
       setState(() {
         _isAnalyzing = false;
         _showAnimations = false;
@@ -744,9 +736,6 @@ class _MainScreenState extends State<MainScreen>
       final file = File(filePath);
       final bytes = await file.readAsBytes();
 
-      print('Uploading file: $filePath');
-      print('File size: ${bytes.length} bytes');
-
       final uploadResponse = await http.post(
         Uri.parse(uploadUrl),
         headers: {
@@ -755,9 +744,6 @@ class _MainScreenState extends State<MainScreen>
         },
         body: bytes,
       );
-
-      print('Upload response status: ${uploadResponse.statusCode}');
-      print('Upload response body: ${uploadResponse.body}');
 
       if (uploadResponse.statusCode != 200) {
         throw Exception('Failed to upload audio file: ${uploadResponse.body}');
@@ -779,9 +765,6 @@ class _MainScreenState extends State<MainScreen>
           'speech_model': 'universal',
         }),
       );
-
-      print('Transcript response status: ${transcriptResponse.statusCode}');
-      print('Transcript response body: ${transcriptResponse.body}');
 
       if (transcriptResponse.statusCode != 200) {
         throw Exception(
@@ -807,7 +790,6 @@ class _MainScreenState extends State<MainScreen>
         }
 
         final statusData = json.decode(statusResponse.body);
-        print('Transcription status: ${statusData['status']}');
 
         if (statusData['status'] == 'completed') {
           transcribedText = statusData['text'];
@@ -823,7 +805,6 @@ class _MainScreenState extends State<MainScreen>
       // so we don't need to restart it
       _transcribedText = transcribedText;
     } catch (e) {
-      print('Error transcribing audio: $e');
       // Cancel animation sequence and hide animations
       _animationSequenceTimer?.cancel();
       setState(() {
@@ -844,14 +825,6 @@ class _MainScreenState extends State<MainScreen>
     }
   }
 
-  Future<void> _analyzeWithDeepSeek(String text) async {
-    if (text.isEmpty) return;
-
-    // Now this method is obsolete as we handle everything in the animation sequence
-    // Just start the animation sequence
-    _startProcessingAnimationSequence(text);
-  }
-
   Future<void> _stopRecording() async {
     try {
       if (_isRecording) {
@@ -860,7 +833,6 @@ class _MainScreenState extends State<MainScreen>
           _isRecording = false;
           _isPaused = false;
         });
-        print('Recording saved to: $path');
 
         // Start transcription
         if (path != null) {
@@ -872,7 +844,6 @@ class _MainScreenState extends State<MainScreen>
         }
       }
     } catch (e) {
-      print('Error stopping recording: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error stopping recording: $e'),
@@ -887,232 +858,236 @@ class _MainScreenState extends State<MainScreen>
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
-    // Create a stack with the scrollable date selector
-    return Stack(
-      children: [
-        // Main date selector
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: SizedBox(
-            height: 80, // Fixed height for the date selector
-            child: PageView.builder(
-              controller: _pageController,
-              physics: const PageScrollPhysics().applyTo(
-                const BouncingScrollPhysics(
+    // Track if we're currently manually scrolling to avoid interrupting user
+    bool isUserScrolling = false;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+      child: SizedBox(
+        height: 80,
+        child: Stack(
+          children: [
+            // Main date selector
+            NotificationListener<ScrollNotification>(
+              onNotification: (notification) {
+                // Track when user is manually scrolling
+                if (notification is ScrollStartNotification) {
+                  isUserScrolling = true;
+                } else if (notification is ScrollEndNotification) {
+                  // Reset after scrolling ends with a small delay
+                  Future.delayed(const Duration(milliseconds: 300), () {
+                    isUserScrolling = false;
+                  });
+                }
+                return false;
+              },
+              child: PageView.builder(
+                controller: _pageController,
+                physics: const BouncingScrollPhysics(
                   parent: AlwaysScrollableScrollPhysics(),
                 ),
-              ),
-              onPageChanged: (pageIndex) {
-                debugPrint(
-                    "Page changed to: $pageIndex (initial: $_initialPage)");
+                onPageChanged: (pageIndex) {
+                  if (!mounted) return;
 
-                // Prevent navigating beyond the current week
-                if (pageIndex <= _initialPage) {
-                  // Current week or past weeks - no need to change selection
+                  // Only update the page tracking - don't modify the selected date
+                  setState(() {
+                    _currentSelectedPage = pageIndex;
+                    // We're completely removing any date selection logic from here
+                    // This was the root cause of the problem
+                  });
+
+                  // Keep these debug prints but don't use them to modify state
                   final weekOffset = _initialPage - pageIndex;
                   debugPrint("Week offset: $weekOffset weeks before current");
 
-                  // For current week (offset 0) or past weeks (offset > 0)
                   final newStartOfWeek = now.subtract(
                       Duration(days: now.weekday - 1 + (weekOffset * 7)));
                   debugPrint(
                       "Week starting date: ${newStartOfWeek.toString()}");
+                },
+                itemBuilder: (context, pageIndex) {
+                  // Only build pages for current week and past weeks
+                  if (pageIndex > _initialPage) {
+                    return Container(); // Empty container for future weeks
+                  }
 
-                  // Don't change the selected date when scrolling
-                  // Just let the user see the different weeks
-                } else {
-                  // Future weeks not allowed
-                  debugPrint("Preventing navigation to future week");
-                  _pageController.animateToPage(
-                    _initialPage,
-                    duration: Duration(milliseconds: 300),
-                    curve: Curves.easeInOut,
-                  );
-                }
-              },
-              itemBuilder: (context, pageIndex) {
-                // Only build pages for current week and past weeks
-                if (pageIndex > _initialPage) {
-                  return Container(); // Empty container for future weeks
-                }
+                  // For current week (offset 0) or past weeks (offset > 0)
+                  final weekOffset = _initialPage - pageIndex;
+                  final startOfWeek = now.subtract(
+                      Duration(days: now.weekday - 1 + (weekOffset * 7)));
 
-                // For current week (offset 0) or past weeks (offset > 0)
-                final weekOffset = _initialPage - pageIndex;
-                final startOfWeek = now.subtract(
-                    Duration(days: now.weekday - 1 + (weekOffset * 7)));
+                  final weekdays = [
+                    'Mon',
+                    'Tue',
+                    'Wed',
+                    'Thu',
+                    'Fri',
+                    'Sat',
+                    'Sun'
+                  ];
 
-                final weekdays = [
-                  'Mon',
-                  'Tue',
-                  'Wed',
-                  'Thu',
-                  'Fri',
-                  'Sat',
-                  'Sun'
-                ];
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: List.generate(7, (index) {
+                      final dayDate = startOfWeek.add(Duration(days: index));
+                      final normalizedDayDate =
+                          DateTime(dayDate.year, dayDate.month, dayDate.day);
 
-                return Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: List.generate(7, (index) {
-                    final dayDate = startOfWeek.add(Duration(days: index));
-                    final normalizedDayDate =
-                        DateTime(dayDate.year, dayDate.month, dayDate.day);
+                      // For debugging
+                      if (index == 0) {
+                        debugPrint(
+                            "First day of week: ${dayDate.toString()} (Page: $pageIndex)");
+                      }
 
-                    // For debugging
-                    if (index == 0) {
-                      debugPrint(
-                          "First day of week: ${dayDate.toString()} (Page: $pageIndex)");
-                    }
+                      final isSelectedDay =
+                          _selectedDate.year == dayDate.year &&
+                              _selectedDate.month == dayDate.month &&
+                              _selectedDate.day == dayDate.day;
 
-                    final isSelectedDay = _selectedDate.year == dayDate.year &&
-                        _selectedDate.month == dayDate.month &&
-                        _selectedDate.day == dayDate.day;
+                      final isCurrentDay = dayDate.year == today.year &&
+                          dayDate.month == today.month &&
+                          dayDate.day == today.day;
 
-                    final isCurrentDay = dayDate.year == today.year &&
-                        dayDate.month == today.month &&
-                        dayDate.day == today.day;
+                      // Check if date is after today (future date)
+                      final bool isFuture = normalizedDayDate.isAfter(today);
 
-                    // Check if date is after today (future date)
-                    final bool isFuture = normalizedDayDate.isAfter(today);
+                      // Set text color:
+                      // - Future dates: light grey
+                      // - Today: blue
+                      // - Selected day: dark grey
+                      // - Other dates: medium grey
+                      final Color textColor = isFuture
+                          ? const Color(
+                              0xFFD0D0D0) // Lighter gray for disabled dates
+                          : isCurrentDay
+                              ? const Color(
+                                  0xFF225AFF) // Blue for today instead of orange
+                              : isSelectedDay
+                                  ? const Color(0xFF191919)
+                                  : const Color(0xFF9D9D9D);
 
-                    // Set text color:
-                    // - Future dates: light grey
-                    // - Today: blue
-                    // - Selected day: dark grey
-                    // - Other dates: medium grey
-                    final Color textColor = isFuture
-                        ? const Color(
-                            0xFFD0D0D0) // Lighter gray for disabled dates
-                        : isCurrentDay
-                            ? const Color(
-                                0xFF225AFF) // Blue for today instead of orange
-                            : isSelectedDay
-                                ? const Color(0xFF191919)
-                                : const Color(0xFF9D9D9D);
+                      // Set background color for selected dates:
+                      // - Light blue for today
+                      // - Light grey for other dates
+                      final Color selectionColor = isCurrentDay
+                          ? const Color.fromARGB(255, 236, 242,
+                              255) // Light blue for today instead of light orange
+                          : const Color(
+                              0xFFEEEEEE); // Light grey for other dates
 
-                    // Set background color for selected dates:
-                    // - Light blue for today
-                    // - Light grey for other dates
-                    final Color selectionColor = isCurrentDay
-                        ? const Color.fromARGB(255, 236, 242,
-                            255) // Light blue for today instead of light orange
-                        : const Color(0xFFEEEEEE); // Light grey for other dates
-
-                    return InkWell(
-                      splashColor: Colors.transparent,
-                      highlightColor: Colors.transparent,
-                      onTap: isFuture
-                          ? null
-                          : () {
-                              debugPrint(
-                                  "Date tapped: ${dayDate.toString()}, isFuture: $isFuture");
-                              setState(() {
-                                _selectedDate = dayDate;
-                              });
-                              // Always reload data when changing dates to ensure we have fresh data
-                              _loadEntriesForSelectedDate().then((_) {
+                      return InkWell(
+                        splashColor: Colors.transparent,
+                        highlightColor: Colors.transparent,
+                        onTap: isFuture
+                            ? null
+                            : () {
                                 debugPrint(
-                                    "Entries loaded for ${_formatDate(_selectedDate)}");
-                              });
-                            },
-                      child: Container(
-                        width: 45, // Increase width slightly
-                        decoration: BoxDecoration(
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Column(
-                          children: [
-                            Text(
-                              weekdays[index],
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600, // SemiBold
-                                fontFamily: 'Geist',
-                                color: textColor,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Container(
-                              width: 30,
-                              height: 30,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: isSelectedDay && !isFuture
-                                    ? selectionColor // Use dynamic selection color
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(9),
-                              ),
-                              child: Text(
-                                '${dayDate.day}',
+                                    "Date tapped: ${dayDate.toString()}, isFuture: $isFuture, pageIndex: $pageIndex");
+
+                                setState(() {
+                                  _selectedDate = dayDate;
+                                });
+
+                                // Make sure to reload entries whenever date changes
+                                _loadEntriesForSelectedDate().then((_) {
+                                  debugPrint(
+                                      "Entries loaded for ${_formatDate(_selectedDate)}");
+                                });
+                              },
+                        child: Container(
+                          width: 45, // Increase width slightly
+                          decoration: BoxDecoration(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Column(
+                            children: [
+                              Text(
+                                weekdays[index],
                                 style: TextStyle(
-                                  fontSize: 16,
+                                  fontSize: 14,
                                   fontWeight: FontWeight.w600, // SemiBold
-                                  fontFamily: 'GeistMono',
+                                  fontFamily: 'Geist',
                                   color: textColor,
                                 ),
                               ),
-                            ),
-                            // Removed the dot for today's date
-                          ],
+                              const SizedBox(height: 4),
+                              Container(
+                                width: 30,
+                                height: 30,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: isSelectedDay && !isFuture
+                                      ? selectionColor // Use dynamic selection color
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(9),
+                                ),
+                                child: Text(
+                                  '${dayDate.day}',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600, // SemiBold
+                                    fontFamily: 'GeistMono',
+                                    color: textColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  }),
-                );
-              },
-            ),
-          ),
-        ),
-
-        // Left gradient overlay
-        Positioned(
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: 40,
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [
-                  Colors.white,
-                  Colors.white.withOpacity(0.8),
-                  Colors.white.withOpacity(0.5),
-                  Colors.white.withOpacity(0.0),
-                ],
-                stops: const [0.0, 0.3, 0.6, 1.0],
+                      );
+                    }),
+                  );
+                },
               ),
             ),
-          ),
-        ),
 
-        // Right gradient overlay
-        Positioned(
-          right: 0,
-          top: 0,
-          bottom: 0,
-          width: 40,
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.centerRight,
-                end: Alignment.centerLeft,
-                colors: [
-                  Colors.white,
-                  Colors.white.withOpacity(0.8),
-                  Colors.white.withOpacity(0.5),
-                  Colors.white.withOpacity(0.0),
-                ],
-                stops: const [0.0, 0.3, 0.6, 1.0],
+            // Left gradient overlay
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: 24,
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [
+                      Colors.white,
+                      Colors.white.withOpacity(0.0),
+                    ],
+                    stops: const [0.0, 1.0],
+                  ),
+                ),
               ),
             ),
-          ),
+
+            // Right gradient overlay
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 24,
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.centerRight,
+                    end: Alignment.centerLeft,
+                    colors: [
+                      Colors.white,
+                      Colors.white.withOpacity(0.0),
+                    ],
+                    stops: const [0.0, 1.0],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -1154,85 +1129,90 @@ class _MainScreenState extends State<MainScreen>
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            // Main content
-            LayoutBuilder(
-              builder:
-                  (BuildContext context, BoxConstraints viewportConstraints) {
-                return SingleChildScrollView(
-                  clipBehavior: Clip.none,
-                  physics: const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics(),
-                  ),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                        minHeight: viewportConstraints.maxHeight),
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 24.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Static "today" text with horizontal padding
-                          Padding(
-                            padding: const EdgeInsets.only(
-                                top: 16.0,
-                                left: 24.0,
-                                right: 24.0,
-                                bottom: 16.0),
-                            child: Text(
-                              _formatDate(_selectedDate).toLowerCase(),
-                              style: const TextStyle(
-                                fontSize: 36,
-                                fontWeight: FontWeight.bold,
-                                fontFamily: 'Geist',
-                                color: Color(0xFF171717),
-                                height: 1.0,
-                                letterSpacing: -0.72,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          SafeArea(
+            top: false,
+            child: Stack(
+              children: [
+                // Main content
+                LayoutBuilder(
+                  builder: (BuildContext context,
+                      BoxConstraints viewportConstraints) {
+                    return SingleChildScrollView(
+                      clipBehavior: Clip.none,
+                      physics: const BouncingScrollPhysics(
+                        parent: AlwaysScrollableScrollPhysics(),
+                      ),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                            minHeight: viewportConstraints.maxHeight),
+                        child: Padding(
+                          padding:
+                              const EdgeInsets.only(top: 24.0, bottom: 24.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Static "today" text with horizontal padding
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                    top: 16.0,
+                                    left: 24.0,
+                                    right: 24.0,
+                                    bottom: 16.0),
+                                child: Text(
+                                  _formatDate(_selectedDate).toLowerCase(),
+                                  style: const TextStyle(
+                                    fontSize: 36,
+                                    fontWeight: FontWeight.bold,
+                                    fontFamily: 'Geist',
+                                    color: Color(0xFF171717),
+                                    height: 1.0,
+                                    letterSpacing: -0.72,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
 
-                          // Weekday selector without horizontal padding
-                          // to allow full width scrolling
-                          _buildWeekdaySelector(),
+                              // Weekday selector without horizontal padding
+                              // to allow full width scrolling
+                              _buildWeekdaySelector(),
 
-                          // Timeline entries with horizontal padding
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              left: 24.0,
-                              right: 24.0,
-                              top: 16.0,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: _buildTimelineEntries(),
-                            ),
-                          ),
-                        ], // End of Column
-                      ), // End of ConstrainedBox
-                    ), // End of SingleChildScrollView
-                  ), // End of LayoutBuilder
-                ); // End of SingleChildScrollView
-              }, // End of LayoutBuilder builder
+                              // Timeline entries with horizontal padding
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  left: 24.0,
+                                  right: 24.0,
+                                  top: 16.0,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: _buildTimelineEntries(),
+                                ),
+                              ),
+                            ], // End of Column
+                          ), // End of ConstrainedBox
+                        ), // End of SingleChildScrollView
+                      ), // End of LayoutBuilder
+                    ); // End of SingleChildScrollView
+                  }, // End of LayoutBuilder builder
+                ),
+              ],
             ),
+          ),
 
-            // Animation sequence controller - always there but only visible when needed
-            if (_showAnimations)
-              Positioned.fill(
-                child: AnimationSequenceController(key: _animationController),
-              ),
+          // Animation sequence controller - always there but only visible when needed
+          if (_showAnimations)
+            AnimationSequenceController(key: _animationController),
 
-            // Expandable FAB at the bottom right corner - only show when not loading
-            if (!isLoading)
-              Positioned(
-                right: 24, // Changed from 16
-                bottom: 100, // Changed from 16
-                child: _buildExpandableFAB(),
-              ),
-          ],
-        ),
+          // Expandable FAB at the bottom right corner - only show when not loading
+          if (!isLoading)
+            Positioned(
+              right: 24,
+              bottom: 100,
+              child: _buildExpandableFAB(),
+            ),
+        ],
       ),
     );
   }
@@ -1293,25 +1273,10 @@ class _MainScreenState extends State<MainScreen>
 
   // Build a single timeline entry box
   Widget _buildTimelineBox(TimelineEntry entry, String timestamp) {
-    print(
-        'Building timeline box for $timestamp with ${entry.itemOrder.length} items in itemOrder. Notes: ${entry.notes.length}, Tasks: ${entry.tasks.length}');
-
     // Get appropriate time icon based on timestamp
     final timeIcon = TimeIcons.getTimeIcon(entry.timestamp);
 
     List<Widget> contentWidgets = [];
-
-    if (entry.itemOrder.isEmpty) {
-      // If itemOrder is empty, but notes or tasks might exist (e.g. data inconsistency),
-      // try to rebuild it. This is a fallback.
-      if (entry.notes.isNotEmpty || entry.tasks.isNotEmpty) {
-        print(
-            'Warning: itemOrder is empty but notes/tasks exist for $timestamp. Rebuilding itemOrder.');
-        // This rebuilds notes first, then tasks. If a mixed order was intended
-        // to be preserved from storage and itemOrder was lost, this won't restore it.
-        entry.rebuildItemOrder();
-      }
-    }
 
     for (int i = 0; i < entry.itemOrder.length; i++) {
       final itemRef = entry.itemOrder[i];
@@ -1323,20 +1288,14 @@ class _MainScreenState extends State<MainScreen>
           contentWidgets.add(
             _buildDraggableNote(note, timestamp, itemRef.index, orderIndex),
           );
-        } else {
-          print(
-              'Error: Stale note reference in itemOrder for $timestamp. Ref: $itemRef, Notes length: ${entry.notes.length}');
-        }
+        } else {}
       } else if (itemRef.type == ItemType.task) {
         if (itemRef.index < entry.tasks.length) {
           final task = entry.tasks[itemRef.index];
           contentWidgets.add(
             _buildDraggableTask(task, timestamp, itemRef.index, orderIndex),
           );
-        } else {
-          print(
-              'Error: Stale task reference in itemOrder for $timestamp. Ref: $itemRef, Tasks length: ${entry.tasks.length}');
-        }
+        } else {}
       }
     }
 
@@ -1367,7 +1326,6 @@ class _MainScreenState extends State<MainScreen>
     return DragTarget<Map<String, dynamic>>(
       onWillAccept: (data) => true,
       onAccept: (data) {
-        print('Dropping on timeline $timestamp');
         _handleItemDrop(data, timestamp);
       },
       builder: (context, candidateData, rejectedData) {
@@ -1461,9 +1419,11 @@ class _MainScreenState extends State<MainScreen>
       String note, String timestamp, int contentListIndex, int orderIndex) {
     final bool isDragMode = _dragItemTimestamp == timestamp &&
         _dragItemIndex == contentListIndex &&
-        _dragItemType ==
-            ItemType
-                .note; // Use _dragItemIndex and _dragItemType for isDragMode
+        _dragItemType == ItemType.note;
+
+    final TimelineEntry? entry = _timelineEntriesByDate[timestamp]?.first;
+    final String currentStorageId =
+        entry?.itemOrder[orderIndex].storageId ?? ''; // Get storageId
 
     if (isDragMode) {
       return Container(
@@ -1495,6 +1455,7 @@ class _MainScreenState extends State<MainScreen>
                   'content_list_index':
                       contentListIndex, // Index in the notes list
                   'order_index': orderIndex, // Index in the itemOrder list
+                  'storage_id': currentStorageId, // <<< ADDED
                   'dragPosition': Offset.zero,
                 },
                 feedback: Material(
@@ -1576,7 +1537,7 @@ class _MainScreenState extends State<MainScreen>
                       bottomLeft: Radius.circular(6),
                     ),
                   ),
-                  child: Icon(
+                  child: const Icon(
                     Icons.drag_indicator,
                     color: Colors.white,
                     size: 16,
@@ -1598,6 +1559,7 @@ class _MainScreenState extends State<MainScreen>
           orderIndex: orderIndex, // Pass orderIndex
           itemType: ItemType.note,
           content: note,
+          storageId: currentStorageId, // Pass storageId
         );
       },
       child: DragTarget<Map<String, dynamic>>(
@@ -1612,8 +1574,6 @@ class _MainScreenState extends State<MainScreen>
           final TimelineEntry? currentEntry =
               _timelineEntriesByDate[timestamp]?.first;
           if (currentEntry == null) {
-            print(
-                "Error: Could not find TimelineEntry for timestamp $timestamp in _buildDraggableNote's DragTarget");
             return;
           }
 
@@ -1631,6 +1591,7 @@ class _MainScreenState extends State<MainScreen>
                   contentListIndex, // Content list index of this note
               'order_index': orderIndex, // Order index of this note
               'position': insertPosition,
+              'storage_id': currentStorageId, // <<< ADDED
             },
           );
         },
@@ -1646,21 +1607,34 @@ class _MainScreenState extends State<MainScreen>
 
               final topHalf = box.size.height / 2;
               final position = box.globalToLocal(_currentDragPosition);
-              final isTopHalf = position.dy < topHalf;
+
+              // Add a threshold to prevent flickering
+              const threshold = 10.0; // 10 pixel threshold
+              bool isTopHalf;
+
+              if (position.dy < topHalf - threshold) {
+                isTopHalf = true;
+              } else if (position.dy > topHalf + threshold) {
+                isTopHalf = false;
+              } else {
+                // If within threshold, maintain previous state to prevent flickering
+                isTopHalf = position.dy < topHalf;
+              }
 
               return Positioned(
-                top: isTopHalf ? -1.5 : null,
-                bottom: isTopHalf ? null : -1.5,
+                top: isTopHalf ? 1.5 : null,
+                bottom: isTopHalf ? null : 3,
                 left: 4,
                 right: 4,
                 child: Container(
                   height: 3,
                   decoration: BoxDecoration(
-                    color: Colors.blue.shade500,
+                    color: const Color(
+                        0xFF2196F3), // Using same color for consistency
                     borderRadius: BorderRadius.circular(1.5),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.blue.withOpacity(0.3),
+                        color: const Color(0xFF2196F3).withOpacity(0.3),
                         blurRadius: 3,
                         spreadRadius: 1,
                       ),
@@ -1706,9 +1680,14 @@ class _MainScreenState extends State<MainScreen>
       TaskItem task, String timestamp, int contentListIndex, int orderIndex) {
     final bool isDragMode = _dragItemTimestamp == timestamp &&
         _dragItemIndex == contentListIndex &&
-        _dragItemType ==
-            ItemType
-                .task; // Use _dragItemIndex and _dragItemType for isDragMode
+        _dragItemType == ItemType.task;
+
+    final TimelineEntry? entry = _timelineEntriesByDate[timestamp]?.first;
+    final String currentStorageId =
+        entry?.itemOrder[orderIndex].storageId ?? ''; // Get storageId
+
+    // Get or create the controller for this task
+    final riveCheckboxController = _getTaskCheckboxController(currentStorageId);
 
     if (isDragMode) {
       return Container(
@@ -1726,7 +1705,9 @@ class _MainScreenState extends State<MainScreen>
         child: Stack(
           children: [
             // Content part (not draggable)
-            _buildTaskItem(task, isFirstItem: true),
+            _buildTaskItem(task, timestamp, orderIndex, currentStorageId,
+                riveCheckboxController,
+                isFirstItem: true),
 
             // Draggable handle on the right
             Positioned(
@@ -1735,14 +1716,14 @@ class _MainScreenState extends State<MainScreen>
               child: Draggable<Map<String, dynamic>>(
                 data: {
                   'type': 'task',
-                  'content': task
-                      .task, // Or pass the whole TaskItem if needed by drop handler for content
+                  'content': task.task,
                   'completed': task.completed,
                   'source_timestamp': timestamp,
                   'content_list_index':
                       contentListIndex, // Index in the tasks list
                   'order_index': orderIndex, // Index in the itemOrder list
                   'dragPosition': Offset.zero,
+                  'storage_id': currentStorageId, // <<< ADDED
                 },
                 feedback: Material(
                   elevation: 8.0,
@@ -1767,29 +1748,19 @@ class _MainScreenState extends State<MainScreen>
                     ),
                     child: Row(
                       children: [
-                        Container(
-                          width: 16,
-                          height: 16,
-                          decoration: BoxDecoration(
-                            color: task.completed ? Colors.black : Colors.white,
-                            borderRadius: BorderRadius.circular(6.0),
-                            border: Border.all(
-                              width: 1.5,
-                              color: task.completed
-                                  ? Colors.black
-                                  : const Color(0xFFC0C0C0),
-                            ),
+                        // Translate the RiveCheckbox to offset its internal boundary
+                        Transform.translate(
+                          offset:
+                              const Offset(-2.0, -6.0), // Move 2px left, 2px up
+                          child: RiveCheckbox(
+                            isChecked: task.completed,
+                            controller:
+                                riveCheckboxController, // Pass the controller
+                            onChanged: null, // Not interactive in feedback
+                            size: 16, // Adjust size as needed
                           ),
-                          child: task.completed
-                              ? Center(
-                                  child: CustomPaint(
-                                    size: const Size(10, 7.5),
-                                    painter: CheckmarkPainter(),
-                                  ),
-                                )
-                              : null,
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 4), // Reduced from 8 to 4
                         Expanded(
                           child: Text(
                             task.task,
@@ -1859,7 +1830,7 @@ class _MainScreenState extends State<MainScreen>
                       bottomLeft: Radius.circular(6),
                     ),
                   ),
-                  child: Icon(
+                  child: const Icon(
                     Icons.drag_indicator,
                     color: Colors.white,
                     size: 16,
@@ -1882,6 +1853,7 @@ class _MainScreenState extends State<MainScreen>
           itemType: ItemType.task,
           content: task.task,
           completed: task.completed,
+          storageId: currentStorageId, // Pass storageId
         );
       },
       child: DragTarget<Map<String, dynamic>>(
@@ -1897,9 +1869,10 @@ class _MainScreenState extends State<MainScreen>
             timestamp,
             {
               'type': 'task',
-              'index': contentListIndex,
-              'order_index': 0,
+              'content_list_index': contentListIndex,
+              'order_index': orderIndex,
               'position': insertPosition,
+              'storage_id': currentStorageId, // <<< ADDED
             },
           );
         },
@@ -1915,21 +1888,34 @@ class _MainScreenState extends State<MainScreen>
 
               final topHalf = box.size.height / 2;
               final position = box.globalToLocal(_currentDragPosition);
-              final isTopHalf = position.dy < topHalf;
+
+              // Add a threshold to prevent flickering
+              const threshold = 10.0; // 10 pixel threshold
+              bool isTopHalf;
+
+              if (position.dy < topHalf - threshold) {
+                isTopHalf = true;
+              } else if (position.dy > topHalf + threshold) {
+                isTopHalf = false;
+              } else {
+                // If within threshold, maintain previous state to prevent flickering
+                isTopHalf = position.dy < topHalf;
+              }
 
               return Positioned(
-                top: isTopHalf ? -1.5 : null,
-                bottom: isTopHalf ? null : -1.5,
+                top: isTopHalf ? 1.5 : null,
+                bottom: isTopHalf ? null : 3,
                 left: 4,
                 right: 4,
                 child: Container(
                   height: 3,
                   decoration: BoxDecoration(
-                    color: Colors.green.shade500,
+                    color: const Color(
+                        0xFF2196F3), // Using same color for consistency
                     borderRadius: BorderRadius.circular(1.5),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.green.withOpacity(0.3),
+                        color: const Color(0xFF2196F3).withOpacity(0.3),
                         blurRadius: 3,
                         spreadRadius: 1,
                       ),
@@ -1960,7 +1946,9 @@ class _MainScreenState extends State<MainScreen>
                     width: 1,
                   ),
                 ),
-                child: _buildTaskItem(task, isFirstItem: true),
+                child: _buildTaskItem(task, timestamp, orderIndex,
+                    currentStorageId, riveCheckboxController,
+                    isFirstItem: true),
               ),
               if (candidateData.isNotEmpty) snapIndicator,
             ],
@@ -1989,6 +1977,7 @@ class _MainScreenState extends State<MainScreen>
     required int orderIndex, // Added
     required ItemType itemType, // Changed from 'isTask'
     required String content,
+    required String storageId, // Added storageId
     bool? completed,
   }) {
     showModalBottomSheet(
@@ -2019,70 +2008,137 @@ class _MainScreenState extends State<MainScreen>
                 ),
                 const SizedBox(height: 24),
 
-                // Edit button
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _showEditDialog(
-                        context: context,
-                        timestamp: timestamp,
-                        contentListIndex: contentListIndex,
-                        orderIndex: orderIndex,
-                        itemType: itemType,
-                        content: content,
-                        completed: completed,
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF3B82F6), // Blue
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                // Edit and Delete buttons in a Row
+                Row(
+                  children: [
+                    // Edit button
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _showEditDialog(
+                            context: context,
+                            timestamp: timestamp,
+                            contentListIndex: contentListIndex,
+                            orderIndex: orderIndex,
+                            itemType: itemType,
+                            content: content,
+                            completed: completed,
+                            storageId: storageId, // Pass storageId
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFE0E8FF), // Blue
+                          foregroundColor: const Color(0xFF0038DD),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          elevation: 0,
+                          shadowColor: Colors.transparent,
+                        ).copyWith(
+                          overlayColor:
+                              MaterialStateProperty.resolveWith<Color?>(
+                            (Set<MaterialState> states) {
+                              if (states.contains(MaterialState.pressed)) {
+                                return const Color(0xFF0038DD).withOpacity(0.1);
+                              }
+                              if (states.contains(MaterialState.hovered)) {
+                                return const Color(0xFF0038DD)
+                                    .withOpacity(0.05);
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SvgPicture.asset(
+                              'assets/icons/pen.svg',
+                              width: 18,
+                              height: 18,
+                              colorFilter: const ColorFilter.mode(
+                                Color(0xFF0038DD),
+                                BlendMode.srcIn,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Edit',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                                fontFamily: 'Geist',
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      elevation: 0,
                     ),
-                    child: const Text(
-                      'Edit',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        fontFamily: 'Geist',
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
 
-                // Delete button
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _deleteItem(timestamp, orderIndex, itemType);
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFEF4444), // Red
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                    const SizedBox(width: 12),
+
+                    // Delete button
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _deleteItem(timestamp, orderIndex, itemType,
+                              storageId); // Pass storageId
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFFDFDF), // Red
+                          foregroundColor: const Color(0xFFC70000),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          elevation: 0,
+                          shadowColor: Colors.transparent,
+                        ).copyWith(
+                          overlayColor:
+                              MaterialStateProperty.resolveWith<Color?>(
+                            (Set<MaterialState> states) {
+                              if (states.contains(MaterialState.pressed)) {
+                                return const Color(0xFFC70000).withOpacity(0.1);
+                              }
+                              if (states.contains(MaterialState.hovered)) {
+                                return const Color(0xFFC70000)
+                                    .withOpacity(0.05);
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SvgPicture.asset(
+                              'assets/icons/delete.svg',
+                              width: 18,
+                              height: 18,
+                              colorFilter: const ColorFilter.mode(
+                                Color(0xFFC70000),
+                                BlendMode.srcIn,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Delete',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                                fontFamily: 'Geist',
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      elevation: 0,
                     ),
-                    child: const Text(
-                      'Delete',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        fontFamily: 'Geist',
-                      ),
-                    ),
-                  ),
+                  ],
                 ),
+
                 const SizedBox(height: 32),
 
                 // Move or Order section
@@ -2126,9 +2182,9 @@ class _MainScreenState extends State<MainScreen>
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: Row(
+                  child: const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
+                    children: [
                       Icon(Icons.swap_vert, color: Color(0xFF4B4B4B)),
                       SizedBox(width: 8),
                       Text(
@@ -2137,6 +2193,7 @@ class _MainScreenState extends State<MainScreen>
                           color: Color(0xFF4B4B4B),
                           fontWeight: FontWeight.w600,
                           fontFamily: 'Geist',
+                          fontSize: 16,
                         ),
                       ),
                     ],
@@ -2158,6 +2215,7 @@ class _MainScreenState extends State<MainScreen>
     required int orderIndex,
     required ItemType itemType,
     required String content,
+    required String storageId, // Added storageId
     bool? completed,
   }) {
     // Dispose any previous sheet's focus nodes before creating new ones
@@ -2167,7 +2225,7 @@ class _MainScreenState extends State<MainScreen>
     _sheetFocusNodes.clear();
 
     // Create a new controller initialized with the existing content
-    List<TextEditingController> _textControllers = [
+    List<TextEditingController> textControllers = [
       TextEditingController(text: content)
     ];
     _sheetFocusNodes
@@ -2224,7 +2282,7 @@ class _MainScreenState extends State<MainScreen>
                     LayoutBuilder(
                       builder: (context, constraints) {
                         final containerWidth = constraints.maxWidth;
-                        final gap = 4.0; // 4 pixel gap between tabs
+                        const gap = 4.0; // 4 pixel gap between tabs
                         final tabWidth = (containerWidth - 8 - gap) / 2;
 
                         return Container(
@@ -2282,6 +2340,11 @@ class _MainScreenState extends State<MainScreen>
                                         setModalState(() {
                                           selectedType = 'Notes';
                                         });
+                                        // Reload entries when switching tabs to ensure fresh data
+                                        // This ensures we're properly refreshing from storage
+                                        if (mounted) {
+                                          _loadEntriesForSelectedDate();
+                                        }
                                       },
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
@@ -2330,6 +2393,11 @@ class _MainScreenState extends State<MainScreen>
                                         setModalState(() {
                                           selectedType = 'Tasks';
                                         });
+                                        // Reload entries when switching tabs to ensure fresh data
+                                        // This ensures we're properly refreshing from storage
+                                        if (mounted) {
+                                          _loadEntriesForSelectedDate();
+                                        }
                                       },
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
@@ -2402,13 +2470,13 @@ class _MainScreenState extends State<MainScreen>
 
                         // Text field for content
                         TextField(
-                          controller: _textControllers[0],
+                          controller: textControllers[0],
                           focusNode: _sheetFocusNodes[0],
                           minLines: 3,
                           maxLines: 5,
                           decoration: InputDecoration(
                             hintText: selectedType == 'Notes'
-                                ? "I\'ve been thinking about..."
+                                ? "I've been thinking about..."
                                 : "I need to...",
                             hintStyle:
                                 const TextStyle(color: Color(0xFFB3B3B3)),
@@ -2492,12 +2560,12 @@ class _MainScreenState extends State<MainScreen>
                         Expanded(
                           child: ElevatedButton(
                             onPressed: () {
-                              final newContent = _textControllers[0].text;
+                              final newContent = textControllers[0].text;
                               if (newContent.isEmpty) {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
+                                  const SnackBar(
                                     content: Text('Please enter some content'),
-                                    duration: const Duration(seconds: 2),
+                                    duration: Duration(seconds: 2),
                                   ),
                                 );
                                 return;
@@ -2508,8 +2576,8 @@ class _MainScreenState extends State<MainScreen>
                               // Call _updateItem with the new content and type
                               _updateItem(
                                 timestamp: timestamp,
-                                orderIndex: orderIndex,
-                                itemType: selectedType == 'Notes'
+                                orderIndexInItemOrder: orderIndex,
+                                newItemType: selectedType == 'Notes'
                                     ? ItemType.note
                                     : ItemType.task,
                                 newContent: newContent,
@@ -2518,6 +2586,7 @@ class _MainScreenState extends State<MainScreen>
                                     : null,
                                 originalItemType:
                                     itemType, // Pass the original type to handle conversions
+                                storageId: storageId, // Pass storageId
                               );
                             },
                             style: ElevatedButton.styleFrom(
@@ -2551,290 +2620,215 @@ class _MainScreenState extends State<MainScreen>
   // Update a note or task - modified to handle type conversion
   void _updateItem({
     required String timestamp,
-    required int orderIndex,
-    required ItemType itemType,
+    required int orderIndexInItemOrder, // Renamed from orderIndex for clarity
+    required ItemType newItemType, // Renamed from itemType to newItemType
     required String newContent,
     bool? newCompleted,
-    ItemType? originalItemType,
+    required ItemType originalItemType, // Made required
+    required String storageId,
   }) {
     if (newContent.isEmpty) return;
 
     setState(() {
-      // Get the current timeline entry
-      final currentEntry = _timelineEntriesByDate[timestamp]!.first;
+      final currentUiEntry = _timelineEntriesByDate[timestamp]?.first;
+      if (currentUiEntry == null) {
+        return;
+      }
 
-      // Check if we need to convert between note and task
-      final isTypeChange =
-          originalItemType != null && originalItemType != itemType;
+      if (orderIndexInItemOrder < 0 ||
+          orderIndexInItemOrder >= currentUiEntry.itemOrder.length) {
+        return;
+      }
 
-      // Variables to store the item that was updated (or created)
-      String? updatedItemContent;
-      bool? updatedItemCompleted;
-      ItemType? updatedItemType;
+      final TimelineItemRef itemRefToUpdate =
+          currentUiEntry.itemOrder[orderIndexInItemOrder];
+      // Make a mutable copy for storageId if it needs to change due to type conversion
+      String currentStorageId = storageId;
 
-      if (isTypeChange) {
-        // We need to convert from one type to another
+      final int originalContentListIndex = itemRefToUpdate.index;
 
-        // First, find the item in the item order
-        int itemOrderIndex = -1;
-        for (int i = 0; i < currentEntry.itemOrder.length; i++) {
-          final ref = currentEntry.itemOrder[i];
-          if (ref.type == originalItemType && ref.index == orderIndex) {
-            itemOrderIndex = i;
+      // Case 1: Type has changed
+      if (originalItemType != newItemType) {
+        // 1. Delete old entry from Hive
+        _storageService.deleteEntry(
+            currentStorageId); // Use currentStorageId (which is the original ID here)
+
+        // 2. Create and save new entry in Hive with a new ID
+        final newGeneratedStorageId = _storageService.generateId();
+
+        // Attempt to get original DateTime from storage to preserve it across type change
+        // This is a bit convoluted because we only have the ID. Ideally, StorageService would have a getEntryById.
+        // For now, we search all entries for the day.
+        DateTime sOriginaltimestamp = DateTime.now(); // Fallback
+        final sEntriesforday = _storageService.getEntriesForDate(_selectedDate);
+        final sOriginalentryfortimestamp = sEntriesforday
+            .firstWhere((e) => e.id == currentStorageId, orElse: () {
+          return models.TimelineEntry(
+              id: '',
+              content: '',
+              timestamp: DateTime.now(),
+              type: models.EntryType
+                  .note); // Dummy to avoid null, timestamp will be now()
+        });
+        sOriginaltimestamp = sOriginalentryfortimestamp.timestamp;
+
+        final sNewentry = models.TimelineEntry(
+          id: newGeneratedStorageId,
+          content: newContent,
+          timestamp:
+              sOriginaltimestamp, // Preserve original timestamp if possible
+          type: newItemType == ItemType.note
+              ? models.EntryType.note
+              : models.EntryType.task,
+          completed:
+              newItemType == ItemType.task ? (newCompleted ?? false) : false,
+        );
+        _storageService.saveEntry(sNewentry);
+        currentStorageId =
+            newGeneratedStorageId; // Update storageId to the new one for the UI ref
+
+        // 3. Update UI
+        //  a. Remove from old content list and update subsequent indices in itemOrder
+        if (originalItemType == ItemType.note) {
+          if (originalContentListIndex < currentUiEntry.notes.length) {
+            currentUiEntry.notes.removeAt(originalContentListIndex);
+          }
+        } else {
+          // Task
+          if (originalContentListIndex < currentUiEntry.tasks.length) {
+            currentUiEntry.tasks.removeAt(originalContentListIndex);
+          }
+        }
+        // Adjust indices for items of the original type that were after the removed item
+        for (final ref in currentUiEntry.itemOrder) {
+          if (ref.type == originalItemType &&
+              ref.index > originalContentListIndex) {
+            ref.index--;
+          }
+        }
+
+        //  b. Add to new content list (at the end of that list)
+        int newContentListIndexInNewTypeList;
+        if (newItemType == ItemType.note) {
+          newContentListIndexInNewTypeList = currentUiEntry.notes.length;
+          currentUiEntry.notes.add(newContent);
+        } else {
+          // Task
+          newContentListIndexInNewTypeList = currentUiEntry.tasks.length;
+          currentUiEntry.tasks.add(
+              TaskItem(task: newContent, completed: newCompleted ?? false));
+        }
+
+        //  c. Replace the TimelineItemRef in itemOrder with a new one
+        // itemRefToUpdate.type = newItemType; // Cannot do this, type is final
+        // itemRefToUpdate.index = newContentListIndexInNewTypeList; // index is not final, but set in constructor below
+        // itemRefToUpdate.storageId = currentStorageId; // storageId is final
+
+        currentUiEntry.itemOrder[orderIndexInItemOrder] = TimelineItemRef(
+            type: newItemType,
+            index: newContentListIndexInNewTypeList,
+            storageId: currentStorageId // This is the newGeneratedStorageId
+            );
+      } else {
+        // Case 2: No type change, just content/completion update
+        // Fetch the existing models.TimelineEntry using the original storageId
+        // This also feels like it needs a direct getById from StorageService
+        models.TimelineEntry? sEntrytoupdate;
+        final sEntriesforday = _storageService.getEntriesForDate(_selectedDate);
+        for (var e in sEntriesforday) {
+          if (e.id == currentStorageId) {
+            sEntrytoupdate = e;
             break;
           }
         }
 
-        if (itemOrderIndex >= 0) {
-          // Remove the old reference
-          currentEntry.itemOrder.removeAt(itemOrderIndex);
-
-          // Create new item of the correct type
-          if (itemType == ItemType.note) {
-            // Converting task to note
-            int newNoteIndex = currentEntry.notes.length;
-            currentEntry.notes.add(newContent);
-
-            // Add new reference to the notes list
-            currentEntry.itemOrder.insert(itemOrderIndex,
-                TimelineItemRef(type: ItemType.note, index: newNoteIndex));
-
-            // Store for database update
-            updatedItemContent = newContent;
-            updatedItemType = ItemType.note;
-          } else {
-            // Converting note to task
-            int newTaskIndex = currentEntry.tasks.length;
-            currentEntry.tasks.add(TaskItem(
-              task: newContent,
-              completed: newCompleted ?? false,
-            ));
-
-            // Add new reference to the tasks list
-            currentEntry.itemOrder.insert(itemOrderIndex,
-                TimelineItemRef(type: ItemType.task, index: newTaskIndex));
-
-            // Store for database update
-            updatedItemContent = newContent;
-            updatedItemCompleted = newCompleted ?? false;
-            updatedItemType = ItemType.task;
-          }
-
-          // Delete the old item from database and create a new one with the updated type
-          // We need to create a new storage entry for the updated item
-          final now = DateTime.now();
-
-          // Extract timestamp parts from the UI timestamp string (e.g., "3:45 PM")
-          final parts = timestamp.split(' ');
-          final timeParts = parts[0].split(':');
-          int hour = int.parse(timeParts[0]);
-          int minute = int.parse(timeParts[1]);
-
-          // Convert to 24-hour format
-          if (parts[1] == 'PM' && hour < 12) hour += 12;
-          if (parts[1] == 'AM' && hour == 12) hour = 0;
-
-          // Create a DateTime with current date but specified time
-          final currentDate = _selectedDate;
-          final itemTime = DateTime(currentDate.year, currentDate.month,
-              currentDate.day, hour, minute);
-
-          if (updatedItemType == ItemType.note) {
-            final storageEntry = models.TimelineEntry(
-              id: _storageService.generateId(),
-              content: updatedItemContent!,
-              timestamp: itemTime,
-              type: models.EntryType.note,
-              completed: false,
-            );
-            _storageService.saveEntry(storageEntry);
-          } else {
-            final storageEntry = models.TimelineEntry(
-              id: _storageService.generateId(),
-              content: updatedItemContent!,
-              timestamp: itemTime,
-              type: models.EntryType.task,
-              completed: updatedItemCompleted!,
-            );
-            _storageService.saveEntry(storageEntry);
-          }
-
-          // We should also delete the old item, but we don't have its ID
-          // This will be a data leak, but we can't identify the exact item
-          // Ideally, we would store the ID with each UI item too
+        if (sEntrytoupdate == null) {
+          _loadEntriesForSelectedDate(); // Force reload
+          return;
         }
-      } else {
-        // Same type, just update the content
-        if (itemType == ItemType.note) {
-          if (orderIndex < currentEntry.notes.length) {
-            currentEntry.notes[orderIndex] = newContent;
 
-            // Store for database update
-            updatedItemContent = newContent;
-            updatedItemType = ItemType.note;
+        final updatedSEntry = sEntrytoupdate.copyWith(
+          content: newContent,
+          completed: newItemType == ItemType.task
+              ? (newCompleted ?? sEntrytoupdate.completed)
+              : sEntrytoupdate.completed,
+        );
+        _storageService.updateEntry(updatedSEntry);
+
+        // Update UI content list (notes or tasks)
+        if (newItemType == ItemType.note) {
+          if (originalContentListIndex < currentUiEntry.notes.length) {
+            currentUiEntry.notes[originalContentListIndex] = newContent;
           }
         } else {
-          if (orderIndex < currentEntry.tasks.length) {
-            currentEntry.tasks[orderIndex] = TaskItem(
+          // Task
+          if (originalContentListIndex < currentUiEntry.tasks.length) {
+            currentUiEntry.tasks[originalContentListIndex] = TaskItem(
               task: newContent,
-              completed:
-                  newCompleted ?? currentEntry.tasks[orderIndex].completed,
+              completed: newCompleted ??
+                  currentUiEntry.tasks[originalContentListIndex].completed,
             );
-
-            // Store for database update
-            updatedItemContent = newContent;
-            updatedItemCompleted =
-                newCompleted ?? currentEntry.tasks[orderIndex].completed;
-            updatedItemType = ItemType.task;
           }
         }
-
-        // Similar to type change, we need to update the database
-        // But we don't have the ID of the specific item to update
-        // So we'll delete all entries at this timestamp and re-create them
-
-        // Get all items from this timestamp
-        List<models.TimelineEntry> entriesToRecreate = [];
-
-        // Extract timestamp parts from the UI timestamp string (e.g., "3:45 PM")
-        final parts = timestamp.split(' ');
-        final timeParts = parts[0].split(':');
-        int hour = int.parse(timeParts[0]);
-        int minute = int.parse(timeParts[1]);
-
-        // Convert to 24-hour format
-        if (parts[1] == 'PM' && hour < 12) hour += 12;
-        if (parts[1] == 'AM' && hour == 12) hour = 0;
-
-        // Create a DateTime with current date but specified time
-        final currentDate = _selectedDate;
-        final itemTime = DateTime(
-            currentDate.year, currentDate.month, currentDate.day, hour, minute);
-
-        // Get all entries for this date
-        final allEntries = _storageService.getEntriesForDate(_selectedDate);
-
-        // Find entries with matching hour and minute
-        final matchingEntries = allEntries
-            .where((entry) =>
-                entry.timestamp.hour == hour &&
-                entry.timestamp.minute == minute)
-            .toList();
-
-        // Now find the specific entry we want to update
-        // This is an approximation - if there are multiple entries with same content,
-        // this might update the wrong one
-        models.TimelineEntry? entryToUpdate;
-
-        if (updatedItemType == ItemType.note) {
-          // Find a note with similar content
-          for (var entry in matchingEntries) {
-            if (entry.type == models.EntryType.note) {
-              entryToUpdate = entry;
-              break;
-            }
-          }
-
-          if (entryToUpdate != null) {
-            // Update the entry
-            final updatedEntry = models.TimelineEntry(
-              id: entryToUpdate.id,
-              content: updatedItemContent!,
-              timestamp: itemTime,
-              type: models.EntryType.note,
-              completed: false,
-            );
-            _storageService.updateEntry(updatedEntry);
-          }
-        } else if (updatedItemType == ItemType.task) {
-          // Find a task with similar content
-          for (var entry in matchingEntries) {
-            if (entry.type == models.EntryType.task) {
-              entryToUpdate = entry;
-              break;
-            }
-          }
-
-          if (entryToUpdate != null) {
-            // Update the entry
-            final updatedEntry = models.TimelineEntry(
-              id: entryToUpdate.id,
-              content: updatedItemContent!,
-              timestamp: itemTime,
-              type: models.EntryType.task,
-              completed: updatedItemCompleted!,
-            );
-            _storageService.updateEntry(updatedEntry);
-          }
-        }
+        // itemRefToUpdate.storageId remains the same (currentStorageId)
+        // itemRefToUpdate.type remains the same (newItemType which is same as originalItemType)
+        // itemRefToUpdate.index remains the same (originalContentListIndex)
       }
     });
   }
 
   // Delete a note or task
-  void _deleteItem(String timestamp, int orderIndex, ItemType itemType) {
-    // Use orderIndex and itemType
+  void _deleteItem(String timestamp, int orderIndexInItemOrder,
+      ItemType itemType, String storageId) {
+    // Delete from persistent storage first
+    _storageService.deleteEntry(storageId);
+
     setState(() {
+      final uiEntry = _timelineEntriesByDate[timestamp]?.first;
+      if (uiEntry == null) {
+        return;
+      }
+
+      if (orderIndexInItemOrder < 0 ||
+          orderIndexInItemOrder >= uiEntry.itemOrder.length) {
+        return;
+      }
+
+      // Get the reference to the item being deleted BEFORE modifying itemOrder
+      final itemRefToDelete = uiEntry.itemOrder[orderIndexInItemOrder];
+      final int contentListIndexToDelete = itemRefToDelete.index;
+
+      // Remove from the specific content list (notes or tasks)
       if (itemType == ItemType.note) {
-        _timelineEntriesByDate[timestamp]!.removeAt(orderIndex);
-      } else {
-        _timelineEntriesByDate[timestamp]![orderIndex] = TimelineEntry(
-          timestamp: timestamp,
-          isDaytime: _timelineEntriesByDate[timestamp]![orderIndex].isDaytime,
-          notes: [],
-          tasks: [],
-          itemOrder: _timelineEntriesByDate[timestamp]![orderIndex].itemOrder,
-        );
-      }
-
-      // Remove the timestamp entry if it's now empty
-      if (_timelineEntriesByDate[timestamp]!.isEmpty) {
-        _timelineEntriesByDate.remove(timestamp);
-      }
-
-      // Delete from database as well
-      // Extract timestamp parts from the UI timestamp string (e.g., "3:45 PM")
-      final parts = timestamp.split(' ');
-      final timeParts = parts[0].split(':');
-      int hour = int.parse(timeParts[0]);
-      int minute = int.parse(timeParts[1]);
-
-      // Convert to 24-hour format
-      if (parts[1] == 'PM' && hour < 12) hour += 12;
-      if (parts[1] == 'AM' && hour == 12) hour = 0;
-
-      // Get all entries for this date with matching hour and minute
-      final allEntries = _storageService.getEntriesForDate(_selectedDate);
-      final matchingEntries = allEntries
-          .where((entry) =>
-              entry.timestamp.hour == hour && entry.timestamp.minute == minute)
-          .toList();
-
-      if (matchingEntries.isNotEmpty) {
-        // Find the entry that matches our type
-        models.TimelineEntry? entryToDelete;
-
-        if (itemType == ItemType.note) {
-          // Find a note entry
-          for (var entry in matchingEntries) {
-            if (entry.type == models.EntryType.note) {
-              entryToDelete = entry;
-              break;
-            }
-          }
+        if (contentListIndexToDelete < uiEntry.notes.length) {
+          uiEntry.notes.removeAt(contentListIndexToDelete);
         } else {
-          // Find a task entry
-          for (var entry in matchingEntries) {
-            if (entry.type == models.EntryType.task) {
-              entryToDelete = entry;
-              break;
-            }
-          }
+          return; // Avoid further errors
         }
+      } else {
+        // Task
+        if (contentListIndexToDelete < uiEntry.tasks.length) {
+          uiEntry.tasks.removeAt(contentListIndexToDelete);
+        } else {
+          return; // Avoid further errors
+        }
+      }
 
-        if (entryToDelete != null) {
-          _storageService.deleteEntry(entryToDelete.id);
+      // Remove from itemOrder
+      uiEntry.itemOrder.removeAt(orderIndexInItemOrder);
+
+      // Update indices in itemOrder for items of the same type that came after the deleted item
+      for (int i = 0; i < uiEntry.itemOrder.length; i++) {
+        final currentRef = uiEntry.itemOrder[i];
+        if (currentRef.type == itemType &&
+            currentRef.index > contentListIndexToDelete) {
+          currentRef.index--; // Decrement the index
         }
+      }
+
+      // If the UI entry is now empty (no notes, no tasks, and thus itemOrder should be empty)
+      if (uiEntry.notes.isEmpty && uiEntry.tasks.isEmpty) {
+        _timelineEntriesByDate.remove(timestamp);
       }
     });
   }
@@ -2852,6 +2846,8 @@ class _MainScreenState extends State<MainScreen>
     final sourceType =
         sourceTypeString == 'note' ? ItemType.note : ItemType.task;
     final sourceOrderIndex = droppedItemData['order_index'] as int?;
+    final sourceStorageId =
+        droppedItemData['storage_id'] as String? ?? ''; // <<< EXTRACTED
 
     final targetContentListIndex =
         targetItemData['content_list_index'] as int?; // Made nullable
@@ -2863,40 +2859,29 @@ class _MainScreenState extends State<MainScreen>
     final insertPosition = targetItemData['position'] as String;
 
     if (sourceOrderIndex == null) {
-      print('Error: sourceOrderIndex is null. Drag data is likely missing it.');
       return;
     }
     if (sourceContentListIndex == null) {
       // Added check for sourceContentListIndex
-      print(
-          'Error: sourceContentListIndex is null. Drag data is likely missing it.');
       return;
     }
     if (targetOrderIndex == null) {
       // Added check for targetOrderIndex
-      print(
-          'Error: targetOrderIndex is null. Target data is likely missing it.');
       return;
     }
     // targetContentListIndex might be legitimately null if dropping on a timeline box, but not here.
     // However, for _handleItemDropOnExistingItem, targetContentListIndex is expected.
     if (targetContentListIndex == null) {
-      print('Error: targetContentListIndex is null for drop on existing item.');
       return;
     }
 
-    print(
-        '_handleItemDropOnExistingItem: $sourceType from $sourceTimestamp (contentIdx: $sourceContentListIndex, orderIdx: $sourceOrderIndex) -> onto $targetType (contentIdx: $targetContentListIndex, orderIdx: $targetOrderIndex) in $targetTimestamp, pos: $insertPosition');
-
     if (!_timelineEntriesByDate.containsKey(sourceTimestamp) ||
         _timelineEntriesByDate[sourceTimestamp]!.isEmpty) {
-      print('Error: Source timeline $sourceTimestamp not found or empty.');
       return;
     }
     final sourceEntry = _timelineEntriesByDate[sourceTimestamp]!.first;
 
     if (!_timelineEntriesByDate.containsKey(targetTimestamp)) {
-      print('Error: Target timeline $targetTimestamp not found. Creating it.');
       final isDaytime = _isTimestampDaytime(targetTimestamp);
       _timelineEntriesByDate[targetTimestamp] = [
         TimelineEntry(
@@ -2914,8 +2899,6 @@ class _MainScreenState extends State<MainScreen>
       try {
         if (sourceOrderIndex < 0 ||
             sourceOrderIndex >= sourceEntry.itemOrder.length) {
-          print(
-              'Error: sourceOrderIndex $sourceOrderIndex is out of bounds for sourceEntry.itemOrder with length ${sourceEntry.itemOrder.length}');
           return;
         }
         final TimelineItemRef movedItemOrderRef =
@@ -2923,8 +2906,6 @@ class _MainScreenState extends State<MainScreen>
 
         if (movedItemOrderRef.type != sourceType ||
             movedItemOrderRef.index != sourceContentListIndex) {
-          print(
-              'Error: Mismatch in _handleItemDropOnExistingItem. Draggable: $sourceType[$sourceContentListIndex], Found: ${movedItemOrderRef.type}[${movedItemOrderRef.index}]');
           return;
         }
 
@@ -2935,8 +2916,6 @@ class _MainScreenState extends State<MainScreen>
         if (currentMovedItemType == ItemType.note) {
           if (currentMovedItemContentListIndex < 0 ||
               currentMovedItemContentListIndex >= sourceEntry.notes.length) {
-            print(
-                'Error: note index $currentMovedItemContentListIndex out of bounds for notes list length ${sourceEntry.notes.length}');
             return;
           }
           movedItemContent =
@@ -2944,18 +2923,13 @@ class _MainScreenState extends State<MainScreen>
         } else {
           if (currentMovedItemContentListIndex < 0 ||
               currentMovedItemContentListIndex >= sourceEntry.tasks.length) {
-            print(
-                'Error: task index $currentMovedItemContentListIndex out of bounds for tasks list length ${sourceEntry.tasks.length}');
             return;
           }
           movedItemContent =
               sourceEntry.tasks.removeAt(currentMovedItemContentListIndex);
         }
-        print('  Extracted content: $movedItemContent');
 
         sourceEntry.itemOrder.removeAt(sourceOrderIndex);
-        print(
-            '  Removed from source itemOrder at order index: $sourceOrderIndex');
 
         for (final ref in sourceEntry.itemOrder) {
           if (ref.type == currentMovedItemType &&
@@ -2963,9 +2937,8 @@ class _MainScreenState extends State<MainScreen>
             ref.index--;
           }
         }
-        print('  Updated internal list indices in source itemOrder');
 
-        int finalTargetOrderIndex = targetOrderIndex!;
+        int finalTargetOrderIndex = targetOrderIndex;
         if (sourceTimestamp == targetTimestamp &&
             sourceOrderIndex < targetOrderIndex) {
           finalTargetOrderIndex--;
@@ -2975,8 +2948,6 @@ class _MainScreenState extends State<MainScreen>
         }
         finalTargetOrderIndex = math.min(
             math.max(0, finalTargetOrderIndex), targetEntry.itemOrder.length);
-        print(
-            '  Calculated finalTargetOrderIndex for targetEntry.itemOrder: $finalTargetOrderIndex');
 
         int newContentListIndexInTarget;
         if (currentMovedItemType == ItemType.note) {
@@ -2986,28 +2957,21 @@ class _MainScreenState extends State<MainScreen>
           newContentListIndexInTarget = targetEntry.tasks.length;
           targetEntry.tasks.add(movedItemContent as TaskItem);
         }
-        print(
-            '  Added content to target list at new index $newContentListIndexInTarget');
 
         final TimelineItemRef newTargetItemOrderRef = TimelineItemRef(
           type: currentMovedItemType,
           index: newContentListIndexInTarget,
+          storageId: sourceStorageId, // Ensure storageId is passed
         );
         targetEntry.itemOrder
             .insert(finalTargetOrderIndex, newTargetItemOrderRef);
-        print(
-            '  Inserted new ref ($newTargetItemOrderRef) into targetEntry.itemOrder at order index: $finalTargetOrderIndex');
 
         if (sourceEntry.notes.isEmpty &&
             sourceEntry.tasks.isEmpty &&
             sourceEntry.itemOrder.isEmpty) {
           _timelineEntriesByDate.remove(sourceTimestamp);
-          print('  Removed empty source timeline: $sourceTimestamp');
         }
-        print('DropOnItem successful.');
-      } catch (e, s) {
-        print('Error in _handleItemDropOnExistingItem: $e\n$s');
-      }
+      } catch (e) {}
     });
   }
 
@@ -3022,31 +2986,24 @@ class _MainScreenState extends State<MainScreen>
             ? ItemType.note
             : ItemType.task;
     final sourceOrderIndex = data['order_index'] as int?;
+    final sourceStorageId =
+        data['storage_id'] as String? ?? ''; // <<< EXTRACTED
 
     if (sourceOrderIndex == null) {
-      print(
-          'Error: sourceOrderIndex is null in _handleItemDrop. Drag data is likely missing it.');
       return;
     }
     if (sourceContentListIndex == null) {
       // Added check for sourceContentListIndex
-      print(
-          'Error: sourceContentListIndex is null in _handleItemDrop. Drag data is likely missing it.');
       return;
     }
 
-    print(
-        'DropOnTimelineBox: $sourceItemTypeFromDraggable from $sourceTimestamp (contentIdx: $sourceContentListIndex, orderIdx: $sourceOrderIndex) -> to $targetTimestamp');
-
     if (!_timelineEntriesByDate.containsKey(sourceTimestamp) ||
         _timelineEntriesByDate[sourceTimestamp]!.isEmpty) {
-      print('Error: Source timeline $sourceTimestamp not found or empty.');
       return;
     }
     final sourceEntry = _timelineEntriesByDate[sourceTimestamp]!.first;
 
     if (!_timelineEntriesByDate.containsKey(targetTimestamp)) {
-      print('Target timeline $targetTimestamp not found. Creating it.');
       final isDaytime = _isTimestampDaytime(targetTimestamp);
       _timelineEntriesByDate[targetTimestamp] = [
         TimelineEntry(
@@ -3065,8 +3022,6 @@ class _MainScreenState extends State<MainScreen>
         // 1. Extract item from source
         if (sourceOrderIndex < 0 ||
             sourceOrderIndex >= sourceEntry.itemOrder.length) {
-          print(
-              'Error: sourceOrderIndex $sourceOrderIndex is out of bounds for sourceEntry.itemOrder with length ${sourceEntry.itemOrder.length}');
           return;
         }
         final TimelineItemRef movedItemOrderRef =
@@ -3074,8 +3029,6 @@ class _MainScreenState extends State<MainScreen>
 
         if (movedItemOrderRef.type != sourceItemTypeFromDraggable ||
             movedItemOrderRef.index != sourceContentListIndex) {
-          print(
-              'Error: Mismatch between draggable data and sourceEntry.itemOrder[$sourceOrderIndex] in _handleItemDrop. Draggable: $sourceItemTypeFromDraggable[$sourceContentListIndex], Found: ${movedItemOrderRef.type}[${movedItemOrderRef.index}]');
           return;
         }
 
@@ -3086,7 +3039,6 @@ class _MainScreenState extends State<MainScreen>
         if (actualMovedItemType == ItemType.note) {
           if (actualMovedItemContentListIndex < 0 ||
               actualMovedItemContentListIndex >= sourceEntry.notes.length) {
-            print('Error: note index out of bounds in _handleItemDrop');
             return;
           }
           movedItemContent =
@@ -3095,18 +3047,13 @@ class _MainScreenState extends State<MainScreen>
           // ItemType.task
           if (actualMovedItemContentListIndex < 0 ||
               actualMovedItemContentListIndex >= sourceEntry.tasks.length) {
-            print('Error: task index out of bounds in _handleItemDrop');
             return;
           }
           movedItemContent =
               sourceEntry.tasks.removeAt(actualMovedItemContentListIndex);
         }
-        print(
-            '  Extracted content: $movedItemContent of type $actualMovedItemType from content list index $actualMovedItemContentListIndex');
 
         sourceEntry.itemOrder.removeAt(sourceOrderIndex);
-        print(
-            '  Removed from source itemOrder at order index: $sourceOrderIndex');
 
         for (final ref in sourceEntry.itemOrder) {
           if (ref.type == actualMovedItemType &&
@@ -3114,22 +3061,16 @@ class _MainScreenState extends State<MainScreen>
             ref.index--;
           }
         }
-        print(
-            '  Updated internal list indices in source itemOrder for type $actualMovedItemType');
 
         // 2. Add item to target content list (always at the end)
         int newContentListIndexInTarget;
         if (actualMovedItemType == ItemType.note) {
           newContentListIndexInTarget = targetEntry.notes.length;
           targetEntry.notes.add(movedItemContent as String);
-          print(
-              '  Added note content to targetEntry.notes at new list index $newContentListIndexInTarget');
         } else {
           // ItemType.task
           newContentListIndexInTarget = targetEntry.tasks.length;
           targetEntry.tasks.add(movedItemContent as TaskItem);
-          print(
-              '  Added task content to targetEntry.tasks at new list index $newContentListIndexInTarget');
         }
 
         // 3. Create new TimelineItemRef and append to targetEntry.itemOrder
@@ -3137,22 +3078,17 @@ class _MainScreenState extends State<MainScreen>
           type:
               actualMovedItemType, // Use the actual type of the item that was moved
           index: newContentListIndexInTarget,
+          storageId: sourceStorageId, // Ensure storageId is passed
         );
         targetEntry.itemOrder.add(newTargetItemOrderRef); // Append to the end
-        print(
-            '  Appended new ref ($newTargetItemOrderRef) to targetEntry.itemOrder');
 
         // 4. Cleanup source entry if empty
         if (sourceEntry.notes.isEmpty &&
             sourceEntry.tasks.isEmpty &&
             sourceEntry.itemOrder.isEmpty) {
           _timelineEntriesByDate.remove(sourceTimestamp);
-          print('  Removed empty source timeline: $sourceTimestamp');
         }
-        print('DropOnTimelineBox successful.');
-      } catch (e, s) {
-        print('Error in _handleItemDrop: $e\n$s');
-      }
+      } catch (e) {}
     });
   }
 
@@ -3180,8 +3116,8 @@ class _MainScreenState extends State<MainScreen>
       padding: EdgeInsets.only(
         left: 12.0,
         right: 12.0,
-        top: isFirstItem ? 8.0 : 0.0,
-        bottom: 8.0,
+        top: isFirstItem ? 12.0 : 4.0, // Increased from 8.0/0.0 to 12.0/4.0
+        bottom: 12.0, // Increased from 8.0 to 12.0
       ),
       child: Text(
         note,
@@ -3197,64 +3133,90 @@ class _MainScreenState extends State<MainScreen>
   }
 
   // Build a single task item with checkbox
-  Widget _buildTaskItem(TaskItem task, {bool isFirstItem = false}) {
+  Widget _buildTaskItem(TaskItem task, String timestamp, int orderIndex,
+      String storageId, RiveCheckboxController controller,
+      {bool isFirstItem = false}) {
+    const double riveDisplaySize = 36.0; // Set exact size as requested
+    const double desiredLayoutHeight = riveDisplaySize; // Don't reduce height
+
+    // Original X/Y offset values
+    const double xOffset = -2.0;
+    const double yOffset = -2.0;
+
+    // Estimate if the text is likely a single line - this is a rough estimate based on character count
+    // You may need to adjust this threshold based on your font size and container width
+    final bool isLikelySingleLine =
+        task.task.length < 40; // Assuming average 40 chars fit on a line
+
+    // Adjust padding based on line count
+    final double textTopPadding = isLikelySingleLine ? 8.0 : 3.0;
+    final double containerBottomPadding = isLikelySingleLine
+        ? 4.0
+        : 8.0; // Reduced bottom padding for single line
+
     return Container(
       padding: EdgeInsets.only(
-        left: 12.0,
-        right: 12.0,
-        top: isFirstItem ? 8.0 : 0.0,
-        bottom: 8.0,
+        left: 3.0, // Exact left padding as requested
+        right: 12.0, // Keep original right padding
+        top: isFirstItem ? 5.0 : 3.0, // Exact top padding as requested
+        bottom:
+            containerBottomPadding, // Adjusted bottom padding based on line count
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          GestureDetector(
-            onTap: () {
-              setState(() {
-                task.completed = !task.completed;
-              });
-            },
-            child: Container(
-              margin: const EdgeInsets.only(top: 5),
-              width: 16,
-              height: 16,
-              decoration: BoxDecoration(
-                color: task.completed ? Colors.black : Colors.white,
-                borderRadius: BorderRadius.circular(6.0),
-                border: Border.all(
-                  width: 1.5,
-                  color:
-                      task.completed ? Colors.black : const Color(0xFFC0C0C0),
+          SizedBox(
+            width: riveDisplaySize,
+            height: desiredLayoutHeight,
+            child: ClipRect(
+              child: Transform.translate(
+                offset: Offset(xOffset, yOffset),
+                child: RiveCheckbox(
+                  isChecked: task.completed,
+                  controller: controller,
+                  onChanged: (bool? newValue) {
+                    if (newValue == null) return;
+                    _updateItem(
+                      timestamp: timestamp,
+                      orderIndexInItemOrder: orderIndex,
+                      newItemType: ItemType.task,
+                      newContent: task.task,
+                      newCompleted: newValue,
+                      originalItemType: ItemType.task,
+                      storageId: storageId,
+                    );
+                  },
+                  size: riveDisplaySize,
                 ),
               ),
-              child: task.completed
-                  ? Center(
-                      child: CustomPaint(
-                        size: const Size(10, 7.5),
-                        painter: CheckmarkPainter(),
-                      ),
-                    )
-                  : null,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 0), // No gap as requested
           Expanded(
-            child: GestureDetector(
-              onTap: () {
-                setState(() {
-                  task.completed = !task.completed;
-                });
-              },
-              child: Text(
-                task.task,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontFamily: 'Geist',
-                  fontWeight: FontWeight.w500,
-                  decoration:
-                      task.completed ? TextDecoration.lineThrough : null,
-                  decorationColor: task.completed ? Colors.grey.shade400 : null,
-                  color: task.completed ? Colors.grey.shade400 : Colors.black,
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: textTopPadding, // Adjusted based on line count
+                bottom: isLikelySingleLine
+                    ? 0.0
+                    : 1.0, // Slight adjustment to vertical spacing for single line
+              ),
+              child: GestureDetector(
+                onTap: () {
+                  _updateItem(
+                    timestamp: timestamp,
+                    orderIndexInItemOrder: orderIndex,
+                    newItemType: ItemType.task,
+                    newContent: task.task,
+                    newCompleted: !task.completed,
+                    originalItemType: ItemType.task,
+                    storageId: storageId,
+                  );
+                  controller.fire();
+                },
+                child: AnimatedStrikethroughText(
+                  text: task.task,
+                  isCompleted: task.completed,
+                  isSingleLine: isLikelySingleLine,
                 ),
               ),
             ),
@@ -3298,13 +3260,12 @@ class _MainScreenState extends State<MainScreen>
             padding: const EdgeInsets.only(bottom: 8.0),
             child: MaterialButton(
               onPressed: () {
-                print("Note button pressed");
                 _addNote();
               },
               elevation: 0, // Set to 0 to use our custom shadow
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
-                side: BorderSide(width: 2, color: const Color(0xFFE1E1E1)),
+                side: const BorderSide(width: 2, color: Color(0xFFE1E1E1)),
               ),
               color: Colors.white,
               padding: EdgeInsets.zero,
@@ -3318,7 +3279,7 @@ class _MainScreenState extends State<MainScreen>
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  shadows: [
+                  shadows: const [
                     BoxShadow(
                       color: Color(
                           0x15000000), // Reduced opacity from 0x26 to 0x15
@@ -3345,13 +3306,12 @@ class _MainScreenState extends State<MainScreen>
             padding: const EdgeInsets.only(bottom: 8.0),
             child: MaterialButton(
               onPressed: () {
-                print("Task button pressed");
                 _addTask();
               },
               elevation: 0, // Set to 0 to use our custom shadow
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
-                side: BorderSide(width: 2, color: const Color(0xFFE1E1E1)),
+                side: const BorderSide(width: 2, color: Color(0xFFE1E1E1)),
               ),
               color: Colors.white,
               padding: EdgeInsets.zero,
@@ -3365,7 +3325,7 @@ class _MainScreenState extends State<MainScreen>
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  shadows: [
+                  shadows: const [
                     BoxShadow(
                       color: Color(
                           0x15000000), // Reduced opacity from 0x26 to 0x15
@@ -3392,13 +3352,12 @@ class _MainScreenState extends State<MainScreen>
             padding: const EdgeInsets.only(bottom: 16.0),
             child: MaterialButton(
               onPressed: () {
-                print("Record button pressed");
                 _startRecording();
               },
               elevation: 0, // Set to 0 to use our custom shadow
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
-                side: BorderSide(width: 2, color: Colors.white),
+                side: const BorderSide(width: 2, color: Colors.white),
               ),
               padding: EdgeInsets.zero,
               minWidth: 62,
@@ -3409,15 +3368,15 @@ class _MainScreenState extends State<MainScreen>
                 height: 62,
                 clipBehavior: Clip.antiAlias,
                 decoration: ShapeDecoration(
-                  gradient: LinearGradient(
+                  gradient: const LinearGradient(
                     begin: Alignment(-0.00, -0.00),
                     end: Alignment(1.00, 1.00),
-                    colors: [const Color(0xFF598FFF), const Color(0xFF1E44FF)],
+                    colors: [Color(0xFF598FFF), Color(0xFF1E44FF)],
                   ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  shadows: [
+                  shadows: const [
                     BoxShadow(
                       color: Color(0x26000000),
                       blurRadius: 17.60,
@@ -3432,7 +3391,7 @@ class _MainScreenState extends State<MainScreen>
                     width: 24,
                     height: 24,
                     colorFilter:
-                        ColorFilter.mode(Colors.white, BlendMode.srcIn),
+                        const ColorFilter.mode(Colors.white, BlendMode.srcIn),
                   ),
                 ),
               ),
@@ -3455,15 +3414,15 @@ class _MainScreenState extends State<MainScreen>
             height: 62,
             padding: const EdgeInsets.all(12),
             decoration: ShapeDecoration(
-              gradient: LinearGradient(
+              gradient: const LinearGradient(
                 begin: Alignment(-0.00, -0.00),
                 end: Alignment(1.00, 1.00),
-                colors: [const Color(0xFF413F3F), const Color(0xFF0C0C0C)],
+                colors: [Color(0xFF413F3F), Color(0xFF0C0C0C)],
               ),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
-              shadows: [
+              shadows: const [
                 BoxShadow(
                   color: Color(0x15000000), // Reduced opacity from 0x26 to 0x15
                   blurRadius: 10.0, // Reduced from 17.60
@@ -3501,7 +3460,6 @@ class _MainScreenState extends State<MainScreen>
 
   // Add a new note directly
   void _addNote() {
-    print("_addNote called - Opening note bottom sheet");
     _toggleFabExpanded(); // Close the menu
     _showAddNoteBottomSheet(initialTab: 'Notes'); // Specify 'Notes' tab
   }
@@ -3514,7 +3472,7 @@ class _MainScreenState extends State<MainScreen>
     }
     _sheetFocusNodes.clear();
 
-    List<TextEditingController> _textControllers = [TextEditingController()];
+    List<TextEditingController> textControllers = [TextEditingController()];
     _sheetFocusNodes
         .add(FocusNode()); // Add initial focus node to the class-level list
 
@@ -3566,7 +3524,7 @@ class _MainScreenState extends State<MainScreen>
                     LayoutBuilder(
                       builder: (context, constraints) {
                         final containerWidth = constraints.maxWidth;
-                        final gap = 4.0; // 4 pixel gap between tabs
+                        const gap = 4.0; // 4 pixel gap between tabs
                         final tabWidth = (containerWidth - 8 - gap) /
                             2; // Account for container padding and gap
 
@@ -3625,6 +3583,11 @@ class _MainScreenState extends State<MainScreen>
                                         setModalState(() {
                                           selectedType = 'Notes';
                                         });
+                                        // Reload entries when switching tabs to ensure fresh data
+                                        // This ensures we're properly refreshing from storage
+                                        if (mounted) {
+                                          _loadEntriesForSelectedDate();
+                                        }
                                       },
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
@@ -3673,6 +3636,11 @@ class _MainScreenState extends State<MainScreen>
                                         setModalState(() {
                                           selectedType = 'Tasks';
                                         });
+                                        // Reload entries when switching tabs to ensure fresh data
+                                        // This ensures we're properly refreshing from storage
+                                        if (mounted) {
+                                          _loadEntriesForSelectedDate();
+                                        }
                                       },
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
@@ -3753,14 +3721,14 @@ class _MainScreenState extends State<MainScreen>
                         ListView.builder(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _textControllers.length,
+                          itemCount: textControllers.length,
                           itemBuilder: (context, index) {
                             return Padding(
-                              padding: EdgeInsets.only(bottom: 8.0),
+                              padding: const EdgeInsets.only(bottom: 8.0),
                               child: TextField(
                                 key: ValueKey(
-                                    'textfield_${index}_${_textControllers[index].hashCode}'), // Unique key for each field
-                                controller: _textControllers[index],
+                                    'textfield_${index}_${textControllers[index].hashCode}'), // Unique key for each field
+                                controller: textControllers[index],
                                 focusNode: _sheetFocusNodes[
                                     index], // Use class-level list
                                 minLines: 3,
@@ -3768,7 +3736,7 @@ class _MainScreenState extends State<MainScreen>
                                 // autofocus: index == 0, // Replaced by manual requestFocus
                                 decoration: InputDecoration(
                                   hintText: selectedType == 'Notes'
-                                      ? "I\'ve been thinking about..."
+                                      ? "I've been thinking about..."
                                       : "I need to...",
                                   hintStyle:
                                       const TextStyle(color: Color(0xFFB3B3B3)),
@@ -3812,16 +3780,12 @@ class _MainScreenState extends State<MainScreen>
                           child: Center(
                             child: TextButton(
                               onPressed: () {
-                                print(
-                                    "Add new note button pressed! Current count: ${_textControllers.length}");
                                 setModalState(() {
                                   final newController = TextEditingController();
                                   final newFocusNode = FocusNode();
-                                  _textControllers.add(newController);
+                                  textControllers.add(newController);
                                   _sheetFocusNodes.add(
                                       newFocusNode); // Add to class-level list
-                                  print(
-                                      "Added new controller. New count: ${_textControllers.length}");
 
                                   Future.delayed(
                                       const Duration(milliseconds: 50), () {
@@ -3837,7 +3801,7 @@ class _MainScreenState extends State<MainScreen>
                                 ),
                                 backgroundColor: const Color(0xFFFFFFFF),
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(6),
+                                  borderRadius: BorderRadius.circular(8),
                                   side: const BorderSide(
                                       color: Color(0xFFE1E1E1), width: 1.0),
                                 ),
@@ -3856,7 +3820,7 @@ class _MainScreenState extends State<MainScreen>
                                       color: Color(0xFF848484),
                                       fontFamily: 'Geist',
                                       fontSize: 14,
-                                      fontWeight: FontWeight.w500,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                 ],
@@ -3889,7 +3853,7 @@ class _MainScreenState extends State<MainScreen>
                                 borderRadius: BorderRadius.circular(12),
                               ),
                             ),
-                            child: const Text('Close'),
+                            child: const Text('Cancel'),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -3897,7 +3861,7 @@ class _MainScreenState extends State<MainScreen>
                           child: ElevatedButton(
                             onPressed: () {
                               bool anEntryWasAdded = false;
-                              for (var controller in _textControllers) {
+                              for (var controller in textControllers) {
                                 if (controller.text.isNotEmpty) {
                                   if (selectedType == 'Notes') {
                                     _createNoteEntry(controller.text);
@@ -3953,7 +3917,6 @@ class _MainScreenState extends State<MainScreen>
 
   // Add a new task directly
   void _addTask() {
-    print("_addTask called - Opening task bottom sheet");
     _toggleFabExpanded(); // Close the menu
     _showAddNoteBottomSheet(
         initialTab:
@@ -3993,18 +3956,23 @@ class _MainScreenState extends State<MainScreen>
         // Add to existing entry for this timestamp
         final newNoteIndex = existingUiEntry.notes.length;
         existingUiEntry.notes.add(noteText);
-        existingUiEntry.itemOrder
-            .add(TimelineItemRef(type: ItemType.note, index: newNoteIndex));
+        existingUiEntry.itemOrder.add(TimelineItemRef(
+            type: ItemType.note,
+            index: newNoteIndex,
+            storageId: storageEntry.id));
       } else {
         // Create new entry for this timestamp
-        final newNoteIndex = 0;
+        const newNoteIndex = 0;
         final newUiEntry = TimelineEntry(
           timestamp: timestamp,
           isDaytime: isDaytime,
           notes: [noteText],
           tasks: [],
           itemOrder: [
-            TimelineItemRef(type: ItemType.note, index: newNoteIndex)
+            TimelineItemRef(
+                type: ItemType.note,
+                index: newNoteIndex,
+                storageId: storageEntry.id)
           ],
         );
         _timelineEntriesByDate[timestamp] = [newUiEntry];
@@ -4048,11 +4016,13 @@ class _MainScreenState extends State<MainScreen>
           task: taskText,
           completed: false,
         ));
-        existingUiEntry.itemOrder
-            .add(TimelineItemRef(type: ItemType.task, index: newTaskIndex));
+        existingUiEntry.itemOrder.add(TimelineItemRef(
+            type: ItemType.task,
+            index: newTaskIndex,
+            storageId: storageEntry.id));
       } else {
         // Create new entry for this timestamp
-        final newTaskIndex = 0;
+        const newTaskIndex = 0;
         final newUiEntry = TimelineEntry(
           timestamp: timestamp,
           isDaytime: isDaytime,
@@ -4064,7 +4034,10 @@ class _MainScreenState extends State<MainScreen>
             )
           ],
           itemOrder: [
-            TimelineItemRef(type: ItemType.task, index: newTaskIndex)
+            TimelineItemRef(
+                type: ItemType.task,
+                index: newTaskIndex,
+                storageId: storageEntry.id)
           ],
         );
         _timelineEntriesByDate[timestamp] = [newUiEntry];
@@ -4203,21 +4176,6 @@ class TimelineEntry {
     required this.itemOrder,
   });
 
-  // Recreate the item order based on current notes and tasks
-  void rebuildItemOrder() {
-    itemOrder.clear();
-
-    // First add all notes
-    for (int i = 0; i < notes.length; i++) {
-      itemOrder.add(TimelineItemRef(type: ItemType.note, index: i));
-    }
-
-    // Then add all tasks
-    for (int i = 0; i < tasks.length; i++) {
-      itemOrder.add(TimelineItemRef(type: ItemType.task, index: i));
-    }
-  }
-
   // Add a convenience method to access items by their ordered position
   dynamic getItemAt(int orderIndex) {
     if (orderIndex < 0 || orderIndex >= itemOrder.length) return null;
@@ -4268,11 +4226,13 @@ enum ItemType { note, task }
 class TimelineItemRef {
   final ItemType type;
   int index; // Index within the original notes or tasks list
+  final String storageId; // ID from models.TimelineEntry
 
-  TimelineItemRef({required this.type, required this.index});
+  TimelineItemRef(
+      {required this.type, required this.index, required this.storageId});
 
   @override
-  String toString() => '$type:$index';
+  String toString() => '$type:$index (ID:$storageId)';
 }
 
 class PlusIconPainter extends CustomPainter {
@@ -4311,7 +4271,7 @@ class PlusIconPainter extends CustomPainter {
 
 // Add this class at the end of the file, before the existing CustomPainter classes
 class RecordingPage extends StatefulWidget {
-  const RecordingPage({Key? key}) : super(key: key);
+  const RecordingPage({super.key});
 
   @override
   _RecordingPageState createState() => _RecordingPageState();
@@ -4353,7 +4313,6 @@ class _RecordingPageState extends State<RecordingPage>
   // Preload the transcribe animation for seamless transitions
   void _preloadTranscribeAnimation() async {
     try {
-      print('Preloading transcribe animation');
       final data = await rootBundle.load('assets/animations/transcribe.riv');
       final file = rive.RiveFile.import(data);
       final artboard = file.mainArtboard;
@@ -4373,36 +4332,25 @@ class _RecordingPageState extends State<RecordingPage>
         _transcribeArtboard = artboard;
         _transcribeLoaded = true;
       });
-
-      print('Transcribe animation preloaded');
-    } catch (e) {
-      print('Error preloading transcribe animation: $e');
-    }
+    } catch (e) {}
   }
 
   void _loadRiveAnimation() async {
     try {
-      print('Loading Rive animation from assets/animations/record.riv');
-
       // Make sure Rive is initialized
       await rive.RiveFile.initialize();
 
       // Load the Rive file
       final data = await rootBundle.load('assets/animations/record.riv');
-      print('Rive file loaded, size: ${data.lengthInBytes} bytes');
 
       final file = rive.RiveFile.import(data);
-      print('Rive file imported successfully');
 
       // Get available artboards for debugging
-      print('Available artboards:');
-      for (final artboard in file.artboards) {
-        print(' - ${artboard.name}');
-      }
+
+      for (final artboard in file.artboards) {}
 
       // Setup the artboard - use the main artboard named "Artboard"
       final artboard = file.mainArtboard;
-      print('Using artboard: ${artboard.name}');
 
       // Setup Rive artboard with callback
       var controller = rive.StateMachineController.fromArtboard(
@@ -4411,24 +4359,17 @@ class _RecordingPageState extends State<RecordingPage>
       );
 
       if (controller != null) {
-        print('State machine controller found');
-
         // Set up controller listener before adding it to the artboard
         controller.addEventListener((event) {
-          print('Rive event: $event');
-
           // Check if Click input is triggered in the state machine
           // Re-get the input value each time to ensure we have the latest value
           rive.SMIInput<bool>? clickInput = controller.findInput<bool>('Click');
           if (clickInput != null && clickInput.value && !_isRecording) {
-            print('Click input detected as activated - Touch Area was clicked');
-
             // Start recording in the next frame to avoid build issues
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted && !_isRecording) {
                 // Ensure isPause is false when starting
                 if (_isPauseInput != null) {
-                  print('Ensuring isPause is false');
                   _isPauseInput!.value = false;
                 }
                 _startRecordingAudio();
@@ -4446,23 +4387,14 @@ class _RecordingPageState extends State<RecordingPage>
             controller.findInput<bool>('isPause'); // Store in class field
         var isRecordingInput = controller.findInput<bool>('IsRecording');
 
-        print(
-            'Found inputs: Click=${_clickInput != null}, isPause=${_isPauseInput != null}, IsRecording=${isRecordingInput != null}');
-
         _controller = controller;
-      } else {
-        print('State machine controller NOT found');
-      }
+      } else {}
 
       setState(() {
         _riveArtboard = artboard;
         _riveLoaded = true;
       });
-
-      print('Rive animation loaded successfully');
-    } catch (error) {
-      print('Error loading Rive animation: $error');
-    }
+    } catch (error) {}
   }
 
   @override
@@ -4483,11 +4415,9 @@ class _RecordingPageState extends State<RecordingPage>
       _recordedFilePath =
           '${directory.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
 
-      print('Recording to file path: $_recordedFilePath');
-
       // Start recording
       await _audioRecorder.start(
-        RecordConfig(
+        const RecordConfig(
           encoder: AudioEncoder.aacLc,
           bitRate: 128000,
           sampleRate: 44100,
@@ -4513,7 +4443,6 @@ class _RecordingPageState extends State<RecordingPage>
         }
       });
     } catch (e) {
-      print('Error starting recording: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Recording error: ${e.toString()}'),
@@ -4539,7 +4468,6 @@ class _RecordingPageState extends State<RecordingPage>
 
         // Update Rive animation state - resuming
         if (_isPauseInput != null) {
-          print('Rive: Resuming animation (isPause -> false)');
           _isPauseInput!.value =
               false; // Set isPause to false to resume animation
         }
@@ -4549,7 +4477,6 @@ class _RecordingPageState extends State<RecordingPage>
 
         // Update Rive animation state - pausing
         if (_isPauseInput != null) {
-          print('Rive: Pausing animation (isPause -> true)');
           _isPauseInput!.value = true; // Set isPause to true to pause animation
         }
       }
@@ -4560,7 +4487,6 @@ class _RecordingPageState extends State<RecordingPage>
         _isPaused = !_isPaused; // Toggle the pause state for UI updates
       });
     } catch (e) {
-      print('Error pausing/resuming recording: $e');
       // Avoid calling setState here if the context might be invalid due to an error.
       // Show SnackBar for user feedback.
       if (mounted) {
@@ -4617,7 +4543,6 @@ class _RecordingPageState extends State<RecordingPage>
         Navigator.pop(context);
       }
     } catch (e) {
-      print('Error stopping recording: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error stopping recording: $e'),
@@ -4651,6 +4576,7 @@ class _RecordingPageState extends State<RecordingPage>
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
+        top: false,
         child: Stack(
           children: [
             // Show transcribe animation when submitting
@@ -4666,8 +4592,9 @@ class _RecordingPageState extends State<RecordingPage>
             // Rive animation - centered and enlarged to full width
             else if (_riveLoaded && _riveArtboard != null)
               Align(
-                alignment: Alignment(0, -0.75), // Moves it up 20% from center
-                child: Container(
+                alignment:
+                    const Alignment(0, -0.75), // Moves it up 20% from center
+                child: SizedBox(
                   width: screenWidth, // Use full screen width
                   height: screenWidth, // Same height for aspect ratio
                   child: LayoutBuilder(
@@ -4733,8 +4660,6 @@ class _RecordingPageState extends State<RecordingPage>
                             child: GestureDetector(
                               onTapDown: (_) async {
                                 if (!_isRecording) {
-                                  print('Mic touch area tapped!');
-
                                   // Check permissions first before starting animation or recording
                                   final permissionsGranted =
                                       await _checkPermissions();
@@ -4767,7 +4692,7 @@ class _RecordingPageState extends State<RecordingPage>
                                 }
                               },
                               child: Container(
-                                decoration: BoxDecoration(
+                                decoration: const BoxDecoration(
                                   shape: BoxShape.circle,
                                   color: Colors.transparent,
                                   // Uncomment below for debugging to see touch area
@@ -4849,13 +4774,13 @@ class _RecordingPageState extends State<RecordingPage>
 
                     // Instruction text - not tappable anymore
                     if (!_isRecording)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 170.0),
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 170.0),
                         child: IgnorePointer(
                           ignoring: true, // Allow taps to pass through
                           child: Text(
                             'click to start recording',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.w600,
                               fontFamily: 'Geist',
@@ -4970,8 +4895,8 @@ class _RecordingPageState extends State<RecordingPage>
                                   begin: Alignment(-0.00, -0.00),
                                   end: Alignment(1.00, 1.00),
                                   colors: [
-                                    const Color(0xFF588EFF),
-                                    const Color(0xFF1D44FF)
+                                    Color(0xFF588EFF),
+                                    Color(0xFF1D44FF)
                                   ],
                                 ),
                                 shape: RoundedRectangleBorder(
@@ -5011,6 +4936,7 @@ class _RecordingPageState extends State<RecordingPage>
 
 // Add PulsingDot class at the end of the file
 class PulsingDot extends StatefulWidget {
+  // ignore: use_super_parameters
   const PulsingDot({Key? key, this.isPaused = false}) : super(key: key);
 
   @override
@@ -5082,10 +5008,10 @@ class RiveAnimationFullscreen extends StatefulWidget {
   final String? message; // Make message optional
 
   const RiveAnimationFullscreen({
-    Key? key,
+    super.key,
     required this.animationPath,
     this.message, // Optional parameter
-  }) : super(key: key);
+  });
 
   @override
   _RiveAnimationFullscreenState createState() =>
@@ -5123,8 +5049,6 @@ class _RiveAnimationFullscreenState extends State<RiveAnimationFullscreen>
 
     // If animation path changed, reload the animation
     if (widget.animationPath != oldWidget.animationPath) {
-      print(
-          'Animation path changed from ${oldWidget.animationPath} to ${widget.animationPath}');
       // Reset state
       setState(() {
         _isLoaded = false;
@@ -5147,30 +5071,22 @@ class _RiveAnimationFullscreenState extends State<RiveAnimationFullscreen>
     final loadingPath = _currentAnimationPath;
 
     try {
-      print('Loading Rive animation from ${widget.animationPath}');
-
       // Load the Rive file
       final data = await rootBundle.load(widget.animationPath);
-      print('Rive file loaded, size: ${data.lengthInBytes} bytes');
 
       // Check if widget was disposed or animation path changed during loading
       if (!mounted || loadingPath != _currentAnimationPath) {
-        print('Widget disposed or animation changed during loading');
         return;
       }
 
       final file = rive.RiveFile.import(data);
-      print('Rive file imported successfully');
 
       // Get available artboards for debugging
-      print('Available artboards:');
-      for (final artboard in file.artboards) {
-        print(' - ${artboard.name}');
-      }
+
+      for (final artboard in file.artboards) {}
 
       // Setup the artboard - use the main artboard
       final artboard = file.mainArtboard;
-      print('Using artboard: ${artboard.name}');
 
       // Setup Rive artboard with state machine if available
       var controller = rive.StateMachineController.fromArtboard(
@@ -5179,16 +5095,11 @@ class _RiveAnimationFullscreenState extends State<RiveAnimationFullscreen>
       );
 
       if (controller != null) {
-        print('State machine controller found');
         artboard.addController(controller);
         _controller = controller;
       } else {
-        print('No state machine controller found, using simple animation');
-
         // If no state machine, try to play a simple animation if available
         if (artboard.animations.isNotEmpty) {
-          print('Found ${artboard.animations.length} animations');
-          print('Playing animation: ${artboard.animations.first.name}');
           artboard.addController(
               rive.SimpleAnimation(artboard.animations.first.name));
         }
@@ -5199,10 +5110,8 @@ class _RiveAnimationFullscreenState extends State<RiveAnimationFullscreen>
           _riveArtboard = artboard;
           _isLoaded = true;
         });
-        print('Rive animation loaded successfully');
       }
     } catch (error) {
-      print('Error loading Rive animation: $error');
       // Prevent state update if widget was disposed during loading
       if (mounted && loadingPath == _currentAnimationPath) {
         setState(() {
@@ -5232,7 +5141,7 @@ class _RiveAnimationFullscreenState extends State<RiveAnimationFullscreen>
                 artboard: _riveArtboard!,
                 fit: BoxFit.contain,
               )
-            : Center(
+            : const Center(
                 child: CircularProgressIndicator(),
               ),
       ),
@@ -5242,7 +5151,7 @@ class _RiveAnimationFullscreenState extends State<RiveAnimationFullscreen>
 
 // Create a new animation controller class that holds all animations
 class AnimationSequenceController extends StatefulWidget {
-  const AnimationSequenceController({Key? key}) : super(key: key);
+  const AnimationSequenceController({super.key});
 
   @override
   _AnimationSequenceControllerState createState() =>
@@ -5290,14 +5199,14 @@ class _AnimationSequenceControllerState
     _fadeInAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _fadeController!,
-        curve: Interval(0.0, 1.0, curve: Curves.easeInOut),
+        curve: const Interval(0.0, 1.0, curve: Curves.easeInOut),
       ),
     );
 
     _fadeOutAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
       CurvedAnimation(
         parent: _fadeController!,
-        curve: Interval(0.0, 0.7, curve: Curves.easeInOut),
+        curve: const Interval(0.0, 0.7, curve: Curves.easeInOut),
       ),
     );
 
@@ -5322,8 +5231,6 @@ class _AnimationSequenceControllerState
 
   Future<void> _loadRiveAnimation(String name, String path) async {
     try {
-      print('Loading Rive animation $name from $path');
-
       // Load the file data
       final data = await rootBundle.load(path);
       final file = rive.RiveFile.import(data);
@@ -5361,10 +5268,8 @@ class _AnimationSequenceControllerState
         });
       }
 
-      print('Rive animation $name loaded successfully');
-    } catch (e) {
-      print('Error loading Rive animation $name: $e');
-    }
+      // ignore: empty_catches
+    } catch (e) {}
   }
 
   // Change which animation is currently showing
@@ -5467,13 +5372,200 @@ class _AnimationSequenceControllerState
       height: double.infinity,
       color: Colors.white,
       child: Stack(
+        fit: StackFit.expand,
         children: [
-          if (previousAnimationWidget != null) previousAnimationWidget,
-          if (currentAnimationWidget != null) currentAnimationWidget,
+          if (previousAnimationWidget != null)
+            Positioned.fill(
+              child: previousAnimationWidget,
+            ),
+          if (currentAnimationWidget != null)
+            Positioned.fill(
+              child: currentAnimationWidget,
+            ),
           if (currentAnimationWidget == null && previousAnimationWidget == null)
-            Center(child: CircularProgressIndicator()),
+            const Center(child: CircularProgressIndicator()),
         ],
       ),
     );
+  }
+}
+
+// Add this class at the end of the file
+class AnimatedStrikethroughText extends StatefulWidget {
+  final String text;
+  final bool isCompleted;
+  final bool isSingleLine;
+
+  const AnimatedStrikethroughText({
+    super.key,
+    required this.text,
+    required this.isCompleted,
+    this.isSingleLine = false,
+  });
+
+  @override
+  State<AnimatedStrikethroughText> createState() =>
+      _AnimatedStrikethroughTextState();
+}
+
+class _AnimatedStrikethroughTextState extends State<AnimatedStrikethroughText>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _lineAnimation;
+  late Animation<Color?> _colorAnimation;
+  late TextPainter _textPainter;
+  late TextStyle _textStyle;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+
+    _lineAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    ));
+
+    _colorAnimation = ColorTween(
+      begin: Colors.black,
+      end: Colors.grey.shade400,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    ));
+
+    _initTextPainter();
+
+    if (widget.isCompleted) {
+      _controller.value = 1.0;
+    }
+  }
+
+  void _initTextPainter() {
+    _textStyle = TextStyle(
+      fontSize: 16,
+      fontFamily: 'Geist',
+      fontWeight: FontWeight.w500,
+      height: widget.isSingleLine ? 1.0 : 1.5,
+    );
+
+    _textPainter = TextPainter(
+      text: TextSpan(
+        text: widget.text,
+        style: _textStyle,
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: widget.isSingleLine ? 1 : null,
+    );
+    _textPainter.layout();
+  }
+
+  @override
+  void didUpdateWidget(AnimatedStrikethroughText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (widget.text != oldWidget.text ||
+        widget.isSingleLine != oldWidget.isSingleLine) {
+      _initTextPainter();
+    }
+
+    if (widget.isCompleted != oldWidget.isCompleted) {
+      if (widget.isCompleted) {
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return CustomPaint(
+          foregroundPainter: StrikethroughPainter(
+            progress: _lineAnimation.value,
+            color: _colorAnimation.value ?? Colors.black,
+            textPainter: _textPainter,
+          ),
+          child: Text(
+            widget.text,
+            style: TextStyle(
+              fontSize: 16,
+              fontFamily: 'Geist',
+              fontWeight: FontWeight.w500,
+              color: _colorAnimation.value,
+              height: widget.isSingleLine ? 1.0 : 1.5,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class StrikethroughPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+  final TextPainter textPainter;
+
+  StrikethroughPainter({
+    required this.progress,
+    required this.color,
+    required this.textPainter,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (progress == 0) return;
+
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    // Calculate the actual text width using textPainter
+    final textWidth = textPainter.width;
+
+    // Calculate middle Y position based on text height
+    final textHeight = textPainter.height;
+    // If text is multi-line, we'll draw through the first line only
+    final lineHeight = textPainter.preferredLineHeight;
+    final midY = lineHeight / 2;
+
+    // Calculate start and end positions for the line
+    final startX = 0.0;
+    // Add 2 pixels to extend slightly beyond the text
+    final endX = textWidth + 2.0;
+
+    // Calculate the actual endpoint based on animation progress
+    final currentEndX = startX + (endX - startX) * progress;
+
+    canvas.drawLine(
+      Offset(startX, midY),
+      Offset(currentEndX, midY),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(StrikethroughPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.color != color ||
+        oldDelegate.textPainter != textPainter;
   }
 }

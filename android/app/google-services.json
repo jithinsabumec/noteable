@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "103978403761",
+    "project_id": "noteable-e087f",
+    "storage_bucket": "noteable-e087f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:103978403761:android:feae9077f3ab5fcd5a1f90",
+        "android_client_info": {
+          "package_name": "com.noteable.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "103978403761-o03c5fgp0s3bpeqmreti7fkl77omqjue.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.noteable.app",
+            "certificate_hash": "c0fcbe4c2552ebe89cee228596c4e328a86d2308"
+          }
+        },
+        {
+          "client_id": "103978403761-qns448am3bbr0qe7dibte8ejn0gcjr59.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCdxSUI_sryPjbgtVipVdco5gCgrjXItsM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "103978403761-qns448am3bbr0qe7dibte8ejn0gcjr59.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "103978403761-ejgfbeda55lnj04m5j3dkbbh23n9pdnq.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.zelo.zelo"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

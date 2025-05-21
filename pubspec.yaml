@@ -45,6 +45,9 @@ dependencies:
   # Local storage
   hive: ^2.2.3
   hive_flutter: ^1.1.0
+  firebase_core: ^3.13.0
+  firebase_auth: ^5.5.3
+  google_sign_in: ^6.3.0
 
 dev_dependencies:
   flutter_test:
@@ -126,6 +129,8 @@ flutter:
   assets:
     - assets/icons/
     - assets/animations/
+    - assets/icons/google_logo.svg
+    - assets/animations/tick.riv
 
 # Flutter launcher icons configuration
 flutter_launcher_icons:
