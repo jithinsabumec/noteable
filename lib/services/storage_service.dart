@@ -17,19 +17,49 @@ class StorageService {
   StorageService._internal();
 
   Future<void> initialize() async {
-    // Initialize Hive
-    final appDocumentDir = await getApplicationDocumentsDirectory();
-    await Hive.initFlutter(appDocumentDir.path);
+    try {
+      // Initialize Hive with proper Flutter integration
+      // This will use the appropriate directory for each platform
+      await Hive.initFlutter();
 
-    // Register adapters
-    Hive.registerAdapter(TimelineEntryAdapter());
-    Hive.registerAdapter(EntryTypeAdapter());
-    Hive.registerAdapter(ItemTypeModelAdapter());
-    Hive.registerAdapter(TimelineItemRefModelAdapter());
-    Hive.registerAdapter(TaskItemModelAdapter());
+      // Register adapters only if they haven't been registered already
+      if (!Hive.isAdapterRegistered(0))
+        Hive.registerAdapter(TimelineEntryAdapter());
+      if (!Hive.isAdapterRegistered(1))
+        Hive.registerAdapter(EntryTypeAdapter());
+      if (!Hive.isAdapterRegistered(2))
+        Hive.registerAdapter(TaskItemModelAdapter());
+      if (!Hive.isAdapterRegistered(3))
+        Hive.registerAdapter(ItemTypeModelAdapter());
+      if (!Hive.isAdapterRegistered(4))
+        Hive.registerAdapter(TimelineItemRefModelAdapter());
 
-    // Open box
-    _entriesBox = await Hive.openBox<TimelineEntry>(entriesBoxName);
+      // Open box
+      _entriesBox = await Hive.openBox<TimelineEntry>(entriesBoxName);
+
+      // Verify box is opened successfully
+      if (!Hive.isBoxOpen(entriesBoxName)) {
+        // Try opening with a specific path if default fails
+        final appDocumentDir = await getApplicationDocumentsDirectory();
+        _entriesBox = await Hive.openBox<TimelineEntry>(
+          entriesBoxName,
+          path: appDocumentDir.path,
+        );
+      }
+    } catch (e) {
+      print('Hive initialization error: $e');
+      // Try with a fallback approach
+      try {
+        final appDocumentDir = await getApplicationDocumentsDirectory();
+        await Hive.initFlutter(appDocumentDir.path);
+        _entriesBox = await Hive.openBox<TimelineEntry>(entriesBoxName);
+      } catch (fallbackError) {
+        print('Hive fallback initialization error: $fallbackError');
+        // Create an in-memory box as a last resort
+        _entriesBox =
+            await Hive.openBox<TimelineEntry>(entriesBoxName, path: '');
+      }
+    }
   }
 
   // Save a new entry
@@ -38,13 +68,16 @@ class StorageService {
       await _entriesBox.put(entry.id, entry);
       // Verify entry was saved
       final saved = _entriesBox.get(entry.id);
-      if (saved == null) {}
+      if (saved == null) {
+        print('Entry was not saved successfully: ${entry.id}');
+      }
     } catch (e) {
+      print('Error saving entry: $e');
       // Attempt to save again with a retry
       try {
         await _entriesBox.put(entry.id, entry);
       } catch (e) {
-        // In a production app, you might want to log this to an error reporting service
+        print('Retry error saving entry: $e');
       }
     }
   }
@@ -54,11 +87,13 @@ class StorageService {
     try {
       await _entriesBox.put(entry.id, entry);
     } catch (e) {
+      print('Error updating entry: $e');
       // Attempt to update again with a retry
       try {
         await _entriesBox.put(entry.id, entry);
-        // ignore: empty_catches
-      } catch (e) {}
+      } catch (e) {
+        print('Retry error updating entry: $e');
+      }
     }
   }
 
@@ -66,7 +101,9 @@ class StorageService {
   Future<void> deleteEntry(String id) async {
     try {
       await _entriesBox.delete(id);
-    } catch (e) {}
+    } catch (e) {
+      print('Error deleting entry: $e');
+    }
   }
 
   // Get all entries for a specific date
@@ -82,6 +119,7 @@ class StorageService {
             entryDate.day == startOfDay.day;
       }).toList();
     } catch (e) {
+      print('Error getting entries for date: $e');
       return [];
     }
   }

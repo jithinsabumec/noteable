@@ -29,7 +29,7 @@
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.103978403761-qns448am3bbr0qe7dibte8ejn0gcjr59</string>
+				<string>com.googleusercontent.apps.103978403761-ejgfbeda55lnj04m5j3dkbbh23n9pdnq</string>
 			</array>
 		</dict>
 	</array>
@@ -58,5 +58,10 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>google</string>
+		<string>com.googleusercontent.apps.103978403761-ejgfbeda55lnj04m5j3dkbbh23n9pdnq</string>
+	</array>
 </dict>
 </plist>

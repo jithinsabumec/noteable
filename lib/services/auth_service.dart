@@ -12,9 +12,8 @@ class AuthService {
 
   // Google Sign In instance
   final GoogleSignIn _googleSignIn = GoogleSignIn(
-    // Use serverClientId for Android, as suggested by the plugin warning
-    serverClientId:
-        '103978403761-qns448am3bbr0qe7dibte8ejn0gcjr59.apps.googleusercontent.com',
+    clientId:
+        '103978403761-ejgfbeda55lnj04m5j3dkbbh23n9pdnq.apps.googleusercontent.com',
   );
 
   // Get current user
@@ -32,7 +31,6 @@ class AuthService {
         password: password,
       );
     } catch (e) {
- 
       rethrow;
     }
   }
@@ -46,7 +44,6 @@ class AuthService {
         password: password,
       );
     } catch (e) {
- 
       rethrow;
     }
   }
@@ -74,7 +71,6 @@ class AuthService {
       // Sign in with credential
       return await _auth.signInWithCredential(credential);
     } catch (e) {
- 
       rethrow;
     }
   }
@@ -87,7 +83,6 @@ class AuthService {
       // Sign out of Firebase
       await _auth.signOut();
     } catch (e) {
- 
       rethrow;
     }
   }
@@ -97,7 +92,6 @@ class AuthService {
     try {
       await _auth.sendPasswordResetEmail(email: email);
     } catch (e) {
- 
       rethrow;
     }
   }
@@ -108,7 +102,6 @@ class AuthService {
       await _auth.currentUser?.updateDisplayName(displayName);
       await _auth.currentUser?.updatePhotoURL(photoURL);
     } catch (e) {
- 
       rethrow;
     }
   }

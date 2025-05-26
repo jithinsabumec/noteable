@@ -4,16 +4,48 @@ import 'package:rive/rive.dart' as rive;
 
 // New Controller Class
 class RiveCheckboxController {
-  rive.SMITrigger? _trigger;
+  rive.SMIBool? _isTickedInput;
+  rive.SMITrigger? _checkTrigger;
+  rive.SMITrigger? _uncheckTrigger;
+  bool _isChecked = false;
 
-  // Called by _RiveCheckboxState to link the trigger
-  void _setTrigger(rive.SMITrigger? trigger) {
-    _trigger = trigger;
+  // Called by _RiveCheckboxState to link the inputs
+  void _setInputs({
+    rive.SMIBool? isTickedInput,
+    rive.SMITrigger? checkTrigger,
+    rive.SMITrigger? uncheckTrigger,
+    required bool initialState,
+  }) {
+    _isTickedInput = isTickedInput;
+    _checkTrigger = checkTrigger;
+    _uncheckTrigger = uncheckTrigger;
+    _isChecked = initialState;
+
+    // Initialize the state
+    if (_isTickedInput != null) {
+      _isTickedInput!.value = _isChecked;
+    }
   }
 
   // Called by the parent to fire the animation
   void fire() {
-    _trigger?.fire();
+    if (_isChecked) {
+      _uncheckTrigger?.fire();
+    } else {
+      _checkTrigger?.fire();
+    }
+    if (_isTickedInput != null) {
+      _isChecked = !_isChecked;
+      _isTickedInput!.value = _isChecked;
+    }
+  }
+
+  // Method to update the state without animation
+  void updateState(bool isChecked) {
+    _isChecked = isChecked;
+    if (_isTickedInput != null) {
+      _isTickedInput!.value = isChecked;
+    }
   }
 }
 
@@ -38,7 +70,9 @@ class RiveCheckbox extends StatefulWidget {
 class _RiveCheckboxState extends State<RiveCheckbox> {
   rive.Artboard? _riveArtboard;
   rive.StateMachineController? _stateMachineController;
-  rive.SMITrigger? _riveTrigger;
+  rive.SMIBool? _isTickedInput;
+  rive.SMITrigger? _checkTrigger;
+  rive.SMITrigger? _uncheckTrigger;
 
   bool _isRiveLoaded = false;
   bool _loadError = false;
@@ -46,28 +80,51 @@ class _RiveCheckboxState extends State<RiveCheckbox> {
   @override
   void initState() {
     super.initState();
-    _loadRiveFile().then((_) {
-      // Ensure controller is linked after _riveTrigger is potentially set
-      if (_riveTrigger != null) {
-        widget.controller?._setTrigger(_riveTrigger);
-      }
-    });
+    _loadRiveFile();
   }
 
   @override
   void didUpdateWidget(RiveCheckbox oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If the controller instance changes or is newly provided, update its trigger link.
-    // Also, if the Rive animation reloads (e.g. _riveTrigger changes), relink.
-    if (widget.controller != oldWidget.controller ||
-        (_riveTrigger != null && widget.controller?._trigger != _riveTrigger)) {
-      widget.controller?._setTrigger(_riveTrigger);
+
+    // If checked state changed externally, update the Rive animation state
+    if (widget.isChecked != oldWidget.isChecked) {
+      _updateRiveState();
+    }
+
+    // If the controller instance changes, relink the inputs
+    if (widget.controller != oldWidget.controller &&
+        _isRiveLoaded &&
+        !_loadError) {
+      _linkController();
+    }
+  }
+
+  void _updateRiveState() {
+    // Update the is_ticked input directly
+    if (_isTickedInput != null) {
+      _isTickedInput!.value = widget.isChecked;
+    }
+
+    // Also update the controller's state
+    widget.controller?.updateState(widget.isChecked);
+  }
+
+  void _linkController() {
+    // Link the controller to the Rive inputs
+    if (widget.controller != null && _isTickedInput != null) {
+      widget.controller!._setInputs(
+        isTickedInput: _isTickedInput,
+        checkTrigger: _checkTrigger,
+        uncheckTrigger: _uncheckTrigger,
+        initialState: widget.isChecked,
+      );
     }
   }
 
   Future<void> _loadRiveFile() async {
     try {
-      final data = await rootBundle.load('assets/animations/tick.riv');
+      final data = await rootBundle.load('assets/animations/todo_tick.riv');
       final file = rive.RiveFile.import(data);
       final artboard = file.mainArtboard;
 
@@ -78,16 +135,38 @@ class _RiveCheckboxState extends State<RiveCheckbox> {
 
       if (_stateMachineController != null) {
         artboard.addController(_stateMachineController!);
-        final smiInput = _stateMachineController!.findSMI('isTicked');
-        if (smiInput is rive.SMITrigger) {
-          _riveTrigger = smiInput;
-          // Link to controller if already available (e.g. on hot reload with state)
-          widget.controller?._setTrigger(_riveTrigger);
+
+        // Find the isTicked boolean input (updated from is_ticked to isTicked)
+        final isTickedInput = _stateMachineController!.findSMI('isTicked');
+        if (isTickedInput is rive.SMIBool) {
+          _isTickedInput = isTickedInput;
+          // Set initial state
+          _isTickedInput!.value = widget.isChecked;
         } else {
           debugPrint(
-              "Rive input 'isTicked' was found but is not an SMITrigger. Actual type: ${smiInput?.runtimeType}");
-          _loadError = true;
+              "Rive input 'isTicked' was not found or is not an SMIBool");
         }
+
+        // Find the check trigger
+        final checkTrigger = _stateMachineController!.findSMI('check');
+        if (checkTrigger is rive.SMITrigger) {
+          _checkTrigger = checkTrigger;
+        } else {
+          debugPrint(
+              "Rive trigger 'check' was not found or is not an SMITrigger");
+        }
+
+        // Find the uncheck trigger
+        final uncheckTrigger = _stateMachineController!.findSMI('uncheck');
+        if (uncheckTrigger is rive.SMITrigger) {
+          _uncheckTrigger = uncheckTrigger;
+        } else {
+          debugPrint(
+              "Rive trigger 'uncheck' was not found or is not an SMITrigger");
+        }
+
+        // Link with controller if available
+        _linkController();
       } else {
         debugPrint("Rive 'State Machine 1' not found");
         _loadError = true;
@@ -97,9 +176,7 @@ class _RiveCheckboxState extends State<RiveCheckbox> {
         setState(() {
           _riveArtboard = artboard;
           _isRiveLoaded = true;
-          _loadError = _loadError ||
-              _stateMachineController == null ||
-              (_stateMachineController != null && _riveTrigger == null);
+          _loadError = _loadError || _stateMachineController == null;
         });
       }
     } catch (e) {
@@ -116,13 +193,11 @@ class _RiveCheckboxState extends State<RiveCheckbox> {
   @override
   void dispose() {
     _stateMachineController?.dispose();
-    // It might be good to clear the controller's trigger link if the RiveCheckbox is disposed
-    // widget.controller?._setTrigger(null); // Though controller lifecycle is managed by parent
     super.dispose();
   }
 
   void _handleTap() {
-    if (_loadError || !_isRiveLoaded && _riveArtboard == null) {
+    if (_loadError || !_isRiveLoaded) {
       if (widget.onChanged != null) {
         widget.onChanged!(!widget.isChecked);
       }
@@ -130,7 +205,18 @@ class _RiveCheckboxState extends State<RiveCheckbox> {
     }
 
     if (widget.onChanged != null) {
-      _riveTrigger?.fire();
+      // First update the boolean state
+      if (_isTickedInput != null) {
+        _isTickedInput!.value = !widget.isChecked;
+      }
+
+      // Then trigger the appropriate animation
+      if (widget.isChecked) {
+        _uncheckTrigger?.fire();
+      } else {
+        _checkTrigger?.fire();
+      }
+
       widget.onChanged!(!widget.isChecked);
     }
   }

@@ -46,7 +46,25 @@ void main() async {
   // Initialize storage service
   await StorageService().initialize();
 
+  // Request storage permissions on startup
+  await _requestStoragePermissions();
+
   runApp(const MyApp());
+}
+
+// Standalone function to request storage permissions at app startup
+Future<void> _requestStoragePermissions() async {
+  try {
+    // Check current platform
+    if (Platform.isAndroid || Platform.isIOS) {
+      final storageStatus = await Permission.storage.request();
+      if (!storageStatus.isGranted) {
+        print('Storage permission not granted: $storageStatus');
+      }
+    }
+  } catch (e) {
+    print('Error requesting storage permissions: $e');
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -168,6 +186,7 @@ class _MainScreenState extends State<MainScreen>
         'assets/animations/transcribe.riv',
         'assets/animations/understand.riv',
         'assets/animations/extract.riv',
+        'assets/animations/todo_tick.riv', // Add the new todo checkbox animation
       ];
 
       // Load each animation in parallel
@@ -286,15 +305,23 @@ class _MainScreenState extends State<MainScreen>
       // Always check microphone permission
       final micStatus = await Permission.microphone.status;
 
-      // For Android 11+, we need storage permission with proper handling
-      // For Android 10 and below, we need regular storage permission
-      bool needsRegularStorage = true;
-      bool needsManageStorage =
-          false; // We'll no longer request this due to Play Store restrictions
+      // Storage permission handling for different platform versions
+      bool storagePermissionGranted = false;
 
-      // Consider storage permission granted if regular storage is granted
-      final regularStorageStatus = await Permission.storage.status;
-      final storagePermissionGranted = regularStorageStatus.isGranted;
+      if (Platform.isAndroid) {
+        // For all Android versions, request storage permission
+        final storageStatus = await Permission.storage.status;
+        storagePermissionGranted = storageStatus.isGranted;
+
+        // If Android 13+ (API 33+), we might need additional permissions
+        // but for Hive, storage permission should be sufficient
+      } else if (Platform.isIOS) {
+        // For iOS, we usually don't need explicit storage permission for Hive
+        storagePermissionGranted = true;
+      } else {
+        // For other platforms, assume permission is granted
+        storagePermissionGranted = true;
+      }
 
       // If already granted, return true immediately
       if (micStatus.isGranted && storagePermissionGranted) {
@@ -302,11 +329,17 @@ class _MainScreenState extends State<MainScreen>
       }
 
       // Build permission message
-      String permissionMessage =
-          'Zelo needs microphone access to record your voice and storage access to save recordings';
+      String permissionMessage = 'Zelo needs ';
+      if (!micStatus.isGranted) {
+        permissionMessage += 'microphone access to record your voice';
+      }
+      if (!storagePermissionGranted) {
+        permissionMessage += micStatus.isGranted ? ' and ' : '';
+        permissionMessage += 'storage access to save your data';
+      }
 
       // Show explanation dialog if permissions weren't previously granted
-      if (micStatus.isDenied || regularStorageStatus.isDenied) {
+      if (micStatus.isDenied || !storagePermissionGranted) {
         // Show explanation before requesting
         final bool shouldRequest = await showDialog(
               context: context,
@@ -333,8 +366,7 @@ class _MainScreenState extends State<MainScreen>
           // ignore: use_build_context_synchronously
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content:
-                  Text('Permissions are required to use the recording feature'),
+              content: Text('Permissions are required to use the app features'),
               duration: Duration(seconds: 3),
             ),
           );
@@ -343,8 +375,10 @@ class _MainScreenState extends State<MainScreen>
       }
 
       // Handle permanently denied cases with a more user-friendly approach
-      if (micStatus.isPermanentlyDenied ||
-          regularStorageStatus.isPermanentlyDenied) {
+      final isPermanentlyDenied = micStatus.isPermanentlyDenied ||
+          (Platform.isAndroid && await Permission.storage.isPermanentlyDenied);
+
+      if (isPermanentlyDenied) {
         final bool shouldOpenSettings = await showDialog(
               context: context,
               barrierDismissible: false,
@@ -373,12 +407,27 @@ class _MainScreenState extends State<MainScreen>
       }
 
       // Request permissions
-      final newMicStatus = await Permission.microphone.request();
-      final newStorageStatus = await Permission.storage.request();
+      List<Future<PermissionStatus>> permissionsToRequest = [];
 
-      // Return true if all permissions granted
-      return newMicStatus.isGranted && newStorageStatus.isGranted;
+      if (!micStatus.isGranted) {
+        permissionsToRequest.add(Permission.microphone.request());
+      }
+
+      if (!storagePermissionGranted && Platform.isAndroid) {
+        permissionsToRequest.add(Permission.storage.request());
+      }
+
+      // Wait for all permissions
+      final List<PermissionStatus> results =
+          await Future.wait(permissionsToRequest);
+
+      // Check if all requested permissions were granted
+      final bool allGranted = results.every((status) => status.isGranted);
+
+      // If we didn't need to request any new permissions, consider it a success
+      return allGranted || permissionsToRequest.isEmpty;
     } catch (e) {
+      print('Error checking permissions: $e');
       // If there's an error, return false but don't crash
       return false;
     }
@@ -1222,16 +1271,24 @@ class _MainScreenState extends State<MainScreen>
     if (_timelineEntriesByDate.isEmpty) {
       return [
         Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32.0),
-            child: Text(
-              'No entries for this day',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey.shade600,
-                fontFamily: 'Geist',
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SvgPicture.asset(
+                'assets/icons/home-emptystate.svg',
+                width: 219,
+                height: 137,
               ),
-            ),
+              const SizedBox(height: 16),
+              Text(
+                'You haven\'t added anything yet.',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey.shade600,
+                  fontFamily: 'Geist',
+                ),
+              ),
+            ],
           ),
         )
       ];
@@ -3116,8 +3173,8 @@ class _MainScreenState extends State<MainScreen>
       padding: EdgeInsets.only(
         left: 12.0,
         right: 12.0,
-        top: isFirstItem ? 12.0 : 4.0, // Increased from 8.0/0.0 to 12.0/4.0
-        bottom: 12.0, // Increased from 8.0 to 12.0
+        top: isFirstItem ? 8.0 : 0.0,
+        bottom: 8.0,
       ),
       child: Text(
         note,
@@ -3213,10 +3270,21 @@ class _MainScreenState extends State<MainScreen>
                   );
                   controller.fire();
                 },
-                child: AnimatedStrikethroughText(
-                  text: task.task,
-                  isCompleted: task.completed,
-                  isSingleLine: isLikelySingleLine,
+                child: Text(
+                  task.task,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontFamily: 'Geist',
+                    fontWeight: FontWeight.w500,
+                    decoration:
+                        task.completed ? TextDecoration.lineThrough : null,
+                    decorationColor:
+                        task.completed ? Colors.grey.shade400 : null,
+                    color: task.completed ? Colors.grey.shade400 : Colors.black,
+                    height: isLikelySingleLine
+                        ? 1.0
+                        : 1.5, // Tighter line height for single line text
+                  ),
                 ),
               ),
             ),
@@ -5387,185 +5455,5 @@ class _AnimationSequenceControllerState
         ],
       ),
     );
-  }
-}
-
-// Add this class at the end of the file
-class AnimatedStrikethroughText extends StatefulWidget {
-  final String text;
-  final bool isCompleted;
-  final bool isSingleLine;
-
-  const AnimatedStrikethroughText({
-    super.key,
-    required this.text,
-    required this.isCompleted,
-    this.isSingleLine = false,
-  });
-
-  @override
-  State<AnimatedStrikethroughText> createState() =>
-      _AnimatedStrikethroughTextState();
-}
-
-class _AnimatedStrikethroughTextState extends State<AnimatedStrikethroughText>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _lineAnimation;
-  late Animation<Color?> _colorAnimation;
-  late TextPainter _textPainter;
-  late TextStyle _textStyle;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 500),
-      vsync: this,
-    );
-
-    _lineAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeInOut,
-    ));
-
-    _colorAnimation = ColorTween(
-      begin: Colors.black,
-      end: Colors.grey.shade400,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeInOut,
-    ));
-
-    _initTextPainter();
-
-    if (widget.isCompleted) {
-      _controller.value = 1.0;
-    }
-  }
-
-  void _initTextPainter() {
-    _textStyle = TextStyle(
-      fontSize: 16,
-      fontFamily: 'Geist',
-      fontWeight: FontWeight.w500,
-      height: widget.isSingleLine ? 1.0 : 1.5,
-    );
-
-    _textPainter = TextPainter(
-      text: TextSpan(
-        text: widget.text,
-        style: _textStyle,
-      ),
-      textDirection: TextDirection.ltr,
-      maxLines: widget.isSingleLine ? 1 : null,
-    );
-    _textPainter.layout();
-  }
-
-  @override
-  void didUpdateWidget(AnimatedStrikethroughText oldWidget) {
-    super.didUpdateWidget(oldWidget);
-
-    if (widget.text != oldWidget.text ||
-        widget.isSingleLine != oldWidget.isSingleLine) {
-      _initTextPainter();
-    }
-
-    if (widget.isCompleted != oldWidget.isCompleted) {
-      if (widget.isCompleted) {
-        _controller.forward();
-      } else {
-        _controller.reverse();
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return CustomPaint(
-          foregroundPainter: StrikethroughPainter(
-            progress: _lineAnimation.value,
-            color: _colorAnimation.value ?? Colors.black,
-            textPainter: _textPainter,
-          ),
-          child: Text(
-            widget.text,
-            style: TextStyle(
-              fontSize: 16,
-              fontFamily: 'Geist',
-              fontWeight: FontWeight.w500,
-              color: _colorAnimation.value,
-              height: widget.isSingleLine ? 1.0 : 1.5,
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class StrikethroughPainter extends CustomPainter {
-  final double progress;
-  final Color color;
-  final TextPainter textPainter;
-
-  StrikethroughPainter({
-    required this.progress,
-    required this.color,
-    required this.textPainter,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (progress == 0) return;
-
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    // Calculate the actual text width using textPainter
-    final textWidth = textPainter.width;
-
-    // Calculate middle Y position based on text height
-    final textHeight = textPainter.height;
-    // If text is multi-line, we'll draw through the first line only
-    final lineHeight = textPainter.preferredLineHeight;
-    final midY = lineHeight / 2;
-
-    // Calculate start and end positions for the line
-    final startX = 0.0;
-    // Add 2 pixels to extend slightly beyond the text
-    final endX = textWidth + 2.0;
-
-    // Calculate the actual endpoint based on animation progress
-    final currentEndX = startX + (endX - startX) * progress;
-
-    canvas.drawLine(
-      Offset(startX, midY),
-      Offset(currentEndX, midY),
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(StrikethroughPainter oldDelegate) {
-    return oldDelegate.progress != progress ||
-        oldDelegate.color != color ||
-        oldDelegate.textPainter != textPainter;
   }
 }
