@@ -3,7 +3,9 @@ import 'package:noteable/services/auth_service.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final VoidCallback? onGuestMode;
+
+  const LoginScreen({super.key, this.onGuestMode});
 
   @override
   // ignore: library_private_types_in_public_api
@@ -312,9 +314,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   // Forgot password
                   if (_isLogin)
                     TextButton(
-                      onPressed: () {
-               
-                      },
+                      onPressed: () {},
                       child: Text(
                         'Forgot Password?',
                         style: TextStyle(
@@ -323,6 +323,66 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ),
+
+                  // Guest mode button (for testing purposes)
+                  if (widget.onGuestMode != null) ...[
+                    const SizedBox(height: 24),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            'Testing Mode',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey.shade700,
+                              fontFamily: 'Geist',
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'For testing purposes only',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                              fontFamily: 'Geist',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton(
+                              onPressed: widget.onGuestMode,
+                              style: OutlinedButton.styleFrom(
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                side: BorderSide(color: Colors.grey.shade400),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                              child: Text(
+                                'Continue as Guest',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  fontFamily: 'Geist',
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
