@@ -9,7 +9,7 @@ import '../widgets/timeline/weekday_selector.dart';
 
 import '../widgets/rive_checkbox.dart';
 import '../utils/date_formatter.dart';
-import '../widgets/fab/expandable_fab.dart';
+import '../widgets/rive_animation_widget.dart';
 import '../widgets/bottom_sheets/add_item_bottom_sheet.dart';
 import '../widgets/timeline/timeline_renderer.dart';
 import 'recording_screen.dart';
@@ -55,9 +55,6 @@ class _MainScreenState extends State<MainScreen>
 
   // Flag to track if animations are visible or not
   bool _showAnimations = false;
-
-  // State variable for FAB expansion
-  bool _isFabExpanded = false;
 
   // Map to store RiveCheckboxControllers for each task item
   final Map<String, RiveCheckboxController> _taskCheckboxControllers = {};
@@ -181,16 +178,8 @@ class _MainScreenState extends State<MainScreen>
     debugPrint("Week starting date: ${newStartOfWeek.toString()}");
   }
 
-  // Toggle FAB expansion
-  void _toggleFabExpanded() {
-    setState(() {
-      _isFabExpanded = !_isFabExpanded;
-    });
-  }
-
   // Add a new note directly
   void _addNote() {
-    _toggleFabExpanded(); // Close the menu
     showAddItemBottomSheet(
       context: context,
       initialTab: 'Notes',
@@ -201,7 +190,6 @@ class _MainScreenState extends State<MainScreen>
 
   // Add a new task directly
   void _addTask() {
-    _toggleFabExpanded(); // Close the menu
     showAddItemBottomSheet(
       context: context,
       initialTab: 'Tasks',
@@ -266,10 +254,8 @@ class _MainScreenState extends State<MainScreen>
     );
   }
 
-  // Add a new recording directly
+  // Start recording audio
   void _startRecording() async {
-    _toggleFabExpanded(); // Close the menu
-
     // Prepare for seamless transition by setting up states
     setState(() {
       _showAnimations = false; // Don't show animations yet
@@ -471,13 +457,12 @@ class _MainScreenState extends State<MainScreen>
 
     return Scaffold(
       backgroundColor: Colors.white,
-      floatingActionButton: ExpandableFAB(
-        isExpanded: _isFabExpanded,
-        onToggle: _toggleFabExpanded,
-        onAddNote: _addNote,
-        onAddTask: _addTask,
-        onStartRecording: _startRecording,
+      floatingActionButton: SizedBox(
+        width: 600,
+        height: 250,
+        child: const RiveAnimationWidget(),
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       body: Stack(
         children: [
           // Main content
