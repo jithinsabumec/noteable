@@ -83,7 +83,7 @@ class ItemOptionsDialog extends StatelessWidget {
                       foregroundColor: const Color(0xFF0038DD),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(24),
                       ),
                       elevation: 0,
                       shadowColor: Colors.transparent,
@@ -149,7 +149,7 @@ class ItemOptionsDialog extends StatelessWidget {
                       foregroundColor: const Color(0xFFC70000),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(24),
                       ),
                       elevation: 0,
                       shadowColor: Colors.transparent,

@@ -8,7 +8,6 @@ class TimelineTaskItem extends StatelessWidget {
   final int orderIndex;
   final int contentListIndex;
   final String storageId;
-  final RiveCheckboxController controller;
   final Function(String timestamp, int orderIndex, ItemType itemType,
       String content, bool completed, String storageId) onUpdateItem;
   final Function(String timestamp, int contentListIndex, int orderIndex,
@@ -23,7 +22,6 @@ class TimelineTaskItem extends StatelessWidget {
     required this.orderIndex,
     required this.contentListIndex,
     required this.storageId,
-    required this.controller,
     required this.onUpdateItem,
     required this.onShowItemOptions,
     this.isFirstItem = false,
@@ -31,7 +29,7 @@ class TimelineTaskItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const double riveDisplaySize = 36.0; // Set exact size as requested
+    const double riveDisplaySize = 18.0; // Reduced from 36.0 to 20.0
     const double desiredLayoutHeight = riveDisplaySize; // Don't reduce height
 
     // Original X/Y offset values
@@ -42,11 +40,10 @@ class TimelineTaskItem extends StatelessWidget {
     final bool isLikelySingleLine =
         task.task.length < 40; // Assuming average 40 chars fit on a line
 
-    // Adjust padding based on line count
-    final double textTopPadding = isLikelySingleLine ? 8.0 : 3.0;
-    final double containerBottomPadding = isLikelySingleLine
-        ? 4.0
-        : 8.0; // Reduced bottom padding for single line
+    // Conditional styling based on line count
+    final double riveTopPadding = isLikelySingleLine ? 7.0 : 9.0;
+    final double textTopPadding = isLikelySingleLine ? 8.0 : 6.0;
+    final double textBottomPadding = isLikelySingleLine ? 8.0 : 4.0;
 
     return GestureDetector(
       onLongPress: () {
@@ -79,44 +76,37 @@ class TimelineTaskItem extends StatelessWidget {
             right: 12.0, // Keep original right padding
             top: isFirstItem ? 5.0 : 3.0, // Exact top padding as requested
             bottom:
-                containerBottomPadding, // Adjusted bottom padding based on line count
+                isLikelySingleLine ? 4.0 : 8.0, // Conditional bottom padding
           ),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment
+                .start, // Changed back to start for top alignment
             children: [
-              SizedBox(
-                width: riveDisplaySize,
-                height: desiredLayoutHeight,
-                child: ClipRect(
-                  child: Transform.translate(
-                    offset: Offset(xOffset, yOffset),
-                    child: RiveCheckbox(
-                      isChecked: task.completed,
-                      controller: controller,
-                      onChanged: (bool? newValue) {
-                        if (newValue == null) return;
-                        onUpdateItem(
-                          timestamp,
-                          orderIndex,
-                          ItemType.task,
-                          task.task,
-                          newValue,
-                          storageId,
-                        );
-                      },
-                      size: riveDisplaySize,
-                    ),
-                  ),
+              Padding(
+                padding: EdgeInsets.only(
+                    left: 8.0, top: riveTopPadding), // Conditional top padding
+                child: RiveCheckbox(
+                  isChecked: task.completed,
+                  onChanged: (bool? newValue) {
+                    if (newValue == null) return;
+                    onUpdateItem(
+                      timestamp,
+                      orderIndex,
+                      ItemType.task,
+                      task.task,
+                      newValue,
+                      storageId,
+                    );
+                  },
+                  size: riveDisplaySize,
                 ),
               ),
-              const SizedBox(width: 0), // No gap as requested
+              const SizedBox(width: 8), // Small gap between checkbox and text
               Expanded(
                 child: Padding(
                   padding: EdgeInsets.only(
-                    top: textTopPadding, // Adjusted based on line count
-                    bottom: isLikelySingleLine
-                        ? 0.0
-                        : 1.0, // Slight adjustment to vertical spacing for single line
+                    top: textTopPadding, // Conditional top padding
+                    bottom: textBottomPadding, // Conditional bottom padding
                   ),
                   child: GestureDetector(
                     onTap: () {
@@ -128,7 +118,6 @@ class TimelineTaskItem extends StatelessWidget {
                         !task.completed,
                         storageId,
                       );
-                      controller.fire();
                     },
                     child: Text(
                       task.task,

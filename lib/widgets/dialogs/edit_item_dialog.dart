@@ -89,15 +89,15 @@ class _EditItemDialogState extends State<EditItemDialog> {
             // Drag handle
             Center(
               child: Container(
-                width: 40,
-                height: 5,
+                width: 60,
+                height: 4,
                 decoration: BoxDecoration(
                   color: Colors.grey[300],
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
 
             // Title
             Text(
@@ -117,6 +117,7 @@ class _EditItemDialogState extends State<EditItemDialog> {
               focusNode: focusNodes.first,
               minLines: 3,
               maxLines: 5,
+              textAlignVertical: TextAlignVertical.center,
               decoration: InputDecoration(
                 hintText: selectedType == 'Notes'
                     ? "I've been thinking about..."
@@ -125,21 +126,21 @@ class _EditItemDialogState extends State<EditItemDialog> {
                 fillColor: const Color(0xFFF9F9F9),
                 filled: true,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(
                     color: Color(0xFFE1E1E1),
                     width: 1.0,
                   ),
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(
                     color: Color(0xFFE1E1E1),
                     width: 1.0,
                   ),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(
                     color: Color(0xFFE1E1E1),
                     width: 1.0,
@@ -152,7 +153,7 @@ class _EditItemDialogState extends State<EditItemDialog> {
               ),
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 32),
 
             // Bottom Action Buttons
             Row(
@@ -171,7 +172,7 @@ class _EditItemDialogState extends State<EditItemDialog> {
                       foregroundColor: const Color(0xFF4B4B4B),
                       side: BorderSide(color: Colors.grey.shade300),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(24),
                       ),
                     ),
                     child: const Text('Cancel'),
@@ -207,7 +208,7 @@ class _EditItemDialogState extends State<EditItemDialog> {
                       backgroundColor: Colors.black,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(24),
                       ),
                     ),
                     child: const Text('Save'),
@@ -215,7 +216,9 @@ class _EditItemDialogState extends State<EditItemDialog> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
+            const SizedBox(
+                height: 24), // Additional bottom spacing to match add modal
           ],
         ),
       ),

@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:rive/rive.dart' as rive;
 import 'package:flutter/services.dart';
+import '../services/audio_fft_service.dart';
 
 class RecordingScreen extends StatefulWidget {
   const RecordingScreen({super.key});
@@ -17,6 +18,7 @@ class RecordingScreen extends StatefulWidget {
 class _RecordingScreenState extends State<RecordingScreen>
     with SingleTickerProviderStateMixin {
   final _audioRecorder = AudioRecorder();
+  final _audioFFTService = AudioFFTService();
   bool _isRecording = false;
   bool _isPaused = false;
   String? _recordedFilePath;
@@ -28,7 +30,7 @@ class _RecordingScreenState extends State<RecordingScreen>
   // Rive animation controllers
   rive.StateMachineController? _controller;
   rive.SMIInput<bool>? _clickInput;
-  rive.SMIInput<bool>? _isPauseInput; // Store in class field
+  rive.SMIInput<bool>? _isPauseInput;
 
   // For the Rive animation widget
   rive.Artboard? _riveArtboard;
@@ -42,9 +44,19 @@ class _RecordingScreenState extends State<RecordingScreen>
   @override
   void initState() {
     super.initState();
+    _initializeServices();
     _loadRiveAnimation();
-    // Preload the transcribe animation for seamless transition
     _preloadTranscribeAnimation();
+  }
+
+  Future<void> _initializeServices() async {
+    print('🔧 [DEBUG] Starting service initialization...');
+    try {
+      await _audioFFTService.initialize(debugMode: true);
+      print('🔧 [DEBUG] AudioFFTService initialized successfully');
+    } catch (e) {
+      print('🔧 [DEBUG] Error initializing audio FFT service: $e');
+    }
   }
 
   // Preload the transcribe animation for seamless transitions
@@ -83,7 +95,6 @@ class _RecordingScreenState extends State<RecordingScreen>
       final file = rive.RiveFile.import(data);
 
       // Get available artboards for debugging
-
       for (final artboard in file.artboards) {}
 
       // Setup the artboard - use the main artboard named "Artboard"
@@ -98,8 +109,10 @@ class _RecordingScreenState extends State<RecordingScreen>
       if (controller != null) {
         // Set up controller listener before adding it to the artboard
         controller.addEventListener((event) {
+          // The AudioFFTService now automatically monitors isRecord state
+          // No need for manual start/stop calls here
+
           // Check if Click input is triggered in the state machine
-          // Re-get the input value each time to ensure we have the latest value
           rive.SMIInput<bool>? clickInput = controller.findInput<bool>('Click');
           if (clickInput != null && clickInput.value && !_isRecording) {
             // Start recording in the next frame to avoid build issues
@@ -120,12 +133,17 @@ class _RecordingScreenState extends State<RecordingScreen>
 
         // Find inputs
         _clickInput = controller.findInput<bool>('Click');
-        _isPauseInput =
-            controller.findInput<bool>('isPause'); // Store in class field
+        _isPauseInput = controller.findInput<bool>('isPause');
         var isRecordingInput = controller.findInput<bool>('IsRecording');
 
         _controller = controller;
-      } else {}
+
+        // Set the Rive controller in the FFT service
+        _audioFFTService.setRiveController(controller);
+        print('🔧 [DEBUG] Rive controller set in AudioFFTService');
+      } else {
+        print('🔧 [DEBUG] No state machine controller found');
+      }
 
       setState(() {
         _riveArtboard = artboard;
@@ -139,6 +157,7 @@ class _RecordingScreenState extends State<RecordingScreen>
     _timer?.cancel();
     _controller?.dispose();
     _audioRecorder.dispose();
+    _audioFFTService.dispose();
     super.dispose();
   }
 

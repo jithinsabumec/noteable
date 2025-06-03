@@ -12,62 +12,49 @@ class LoginScreen extends StatefulWidget {
   _LoginScreenState createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _isLoading = false;
-  bool _isGoogleLoading = false; // Loading state for Google Sign-In
-  bool _isLogin = true; // Toggle between login and register
+class _LoginScreenState extends State<LoginScreen>
+    with TickerProviderStateMixin {
+  bool _isGoogleLoading = false;
   String _errorMessage = '';
 
   final AuthService _authService = AuthService();
 
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
+
   @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    );
+
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    ));
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.15),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOutCubic,
+    ));
+
+    _animationController.forward();
   }
 
-  Future<void> _submitForm() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = '';
-      });
-
-      try {
-        if (_isLogin) {
-          // Login
-          await _authService.signInWithEmailAndPassword(
-            _emailController.text.trim(),
-            _passwordController.text.trim(),
-          );
-        } else {
-          // Register
-          await _authService.registerWithEmailAndPassword(
-            _emailController.text.trim(),
-            _passwordController.text.trim(),
-          );
-        }
-
-        // Navigate to home screen on success
-        if (mounted) {
-          Navigator.of(context).pop();
-        }
-      } catch (e) {
-        setState(() {
-          _errorMessage = e.toString();
-        });
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
-      }
-    }
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
   }
 
   Future<void> _signInWithGoogle() async {
@@ -78,10 +65,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       await _authService.signInWithGoogle();
-      // No need to navigate as AuthWrapper will handle it
     } catch (e) {
       setState(() {
-        _errorMessage = e.toString();
+        _errorMessage = e.toString().replaceAll('Exception: ', '');
       });
     } finally {
       if (mounted) {
@@ -95,295 +81,301 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: SingleChildScrollView(
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: 60),
-
-                  // App Logo/Title
-                  const Text(
-                    'Zelo',
-                    style: TextStyle(
-                      fontSize: 36,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: 'Geist',
-                      color: Colors.black,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-
-                  const SizedBox(height: 48),
-
-                  // Email input
-                  TextFormField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: InputDecoration(
-                      labelText: 'Email',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: const Color(0xFFF9F9F9),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter your email';
-                      }
-                      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-                          .hasMatch(value)) {
-                        return 'Please enter a valid email';
-                      }
-                      return null;
-                    },
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // Password input
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: true,
-                    decoration: InputDecoration(
-                      labelText: 'Password',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: const Color(0xFFF9F9F9),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter your password';
-                      }
-                      if (_isLogin == false && value.length < 6) {
-                        return 'Password must be at least 6 characters';
-                      }
-                      return null;
-                    },
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  // Error message
-                  if (_errorMessage.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: Text(
-                        _errorMessage,
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontSize: 14,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-
-                  const SizedBox(height: 24),
-
-                  // Email/Password Submit button
-                  ElevatedButton(
-                    onPressed: _isLoading ? null : _submitForm,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : Text(
-                            _isLogin ? 'Login' : 'Register',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              fontFamily: 'Geist',
-                            ),
-                          ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // Divider with "OR" text
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Divider(
-                          color: Colors.grey.shade300,
-                          thickness: 1,
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                        child: Text(
-                          'OR',
-                          style: TextStyle(
-                            color: Colors.grey.shade500,
-                            fontWeight: FontWeight.w500,
-                            fontFamily: 'Geist',
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Divider(
-                          color: Colors.grey.shade300,
-                          thickness: 1,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // Google Sign-In button
-                  OutlinedButton.icon(
-                    onPressed: _isGoogleLoading ? null : _signInWithGoogle,
-                    icon: _isGoogleLoading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.blue),
-                            ),
-                          )
-                        : SvgPicture.asset(
-                            'assets/icons/google_logo.svg',
-                            width: 18,
-                            height: 18,
-                          ),
-                    label: const Text(
-                      'Continue with Google',
-                      // ignore: unnecessary_const
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                        fontFamily: 'Geist',
-                        color: Colors.black87,
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      side: BorderSide(color: Colors.grey.shade300),
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // Toggle login/register
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        _isLogin = !_isLogin;
-                        _errorMessage = '';
-                      });
-                    },
-                    child: Text(
-                      _isLogin
-                          ? 'Don\'t have an account? Register'
-                          : 'Already have an account? Login',
-                      style: const TextStyle(
-                        color: Colors.blue,
-                        fontFamily: 'Geist',
-                      ),
-                    ),
-                  ),
-
-                  // Forgot password
-                  if (_isLogin)
-                    TextButton(
-                      onPressed: () {},
-                      child: Text(
-                        'Forgot Password?',
-                        style: TextStyle(
-                          color: Colors.grey[700],
-                          fontFamily: 'Geist',
-                        ),
-                      ),
-                    ),
-
-                  // Guest mode button (for testing purposes)
-                  if (widget.onGuestMode != null) ...[
-                    const SizedBox(height: 24),
-                    Container(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment(0.50, -0.00),
+            end: Alignment(0.50, 1.00),
+            colors: [Color(0xFF5387FF), Color(0xFF244CFF)],
+          ),
+        ),
+        child: FadeTransition(
+          opacity: _fadeAnimation,
+          child: SlideTransition(
+            position: _slideAnimation,
+            child: Stack(
+              children: [
+                // Login illustration at the top (enlarged and positioned to cut off top portion)
+                Positioned(
+                  top: -140,
+                  left: -60,
+                  right: -60,
+                  child: Center(
+                    child: Image.asset(
+                      'assets/icons/login.png',
+                      height: 550,
                       width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            'Testing Mode',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey.shade700,
-                              fontFamily: 'Geist',
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'For testing purposes only',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
-                              fontFamily: 'Geist',
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton(
-                              onPressed: widget.onGuestMode,
-                              style: OutlinedButton.styleFrom(
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                side: BorderSide(color: Colors.grey.shade400),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 12),
-                              ),
-                              child: Text(
-                                'Continue as Guest',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                  fontFamily: 'Geist',
-                                  color: Colors.grey.shade700,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                      fit: BoxFit.cover,
                     ),
-                  ],
-                ],
+                  ),
+                ),
+
+                // Main content with SafeArea
+                SafeArea(
+                  child: Positioned.fill(
+                    child: Column(
+                      children: [
+                        // Top spacing to account for illustration
+                        SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.37),
+
+                        // Welcome text section
+                        Expanded(
+                          child: Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 32.0),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                // Welcome text
+                                const Text(
+                                  'Welcome to',
+                                  style: TextStyle(
+                                    fontSize: 36,
+                                    fontWeight: FontWeight.w400,
+                                    fontFamily: 'Geist',
+                                    color: Colors.white70,
+                                    height: 1.2,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+
+                                const SizedBox(height: 2),
+
+                                const Text(
+                                  'Noteable',
+                                  style: TextStyle(
+                                    fontSize: 52,
+                                    fontWeight: FontWeight.bold,
+                                    fontFamily: 'Geist',
+                                    color: Colors.white,
+                                    height: 1.1,
+                                    letterSpacing: -1.0,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+
+                                const SizedBox(height: 80),
+
+                                // Google Sign-In Button
+                                _buildGoogleButton(),
+
+                                const SizedBox(height: 24),
+
+                                // Divider with "or" text
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Container(
+                                        height: 1,
+                                        color: Colors.white.withOpacity(0.3),
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 16),
+                                      child: Text(
+                                        'or',
+                                        style: TextStyle(
+                                          color: Colors.white.withOpacity(0.7),
+                                          fontFamily: 'Geist',
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Container(
+                                        height: 1,
+                                        color: Colors.white.withOpacity(0.3),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 24),
+
+                                // Guest mode text and button
+                                Text(
+                                  'Use guest mode to try the app',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontFamily: 'Geist',
+                                    color: Colors.white.withOpacity(0.65),
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+
+                                const SizedBox(height: 2),
+
+                                RichText(
+                                  textAlign: TextAlign.center,
+                                  text: TextSpan(
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontFamily: 'Geist',
+                                      color: Colors.white.withOpacity(0.65),
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                                    children: [
+                                      const TextSpan(text: 'Includes '),
+                                      TextSpan(
+                                        text:
+                                            '3 free voice-to-insight generations',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          decoration: TextDecoration.underline,
+                                          decorationColor:
+                                              Colors.white.withOpacity(0.85),
+                                          color: Colors.white.withOpacity(0.85),
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                                const SizedBox(height: 24),
+
+                                // Guest mode button
+                                if (widget.onGuestMode != null)
+                                  _buildGuestButton(),
+
+                                // Error message
+                                if (_errorMessage.isNotEmpty) ...[
+                                  const SizedBox(height: 24),
+                                  Container(
+                                    padding: const EdgeInsets.all(16),
+                                    margin: const EdgeInsets.symmetric(
+                                        horizontal: 16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.shade50,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                          color: Colors.red.shade200),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.error_outline,
+                                            color: Colors.red.shade600,
+                                            size: 20),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            _errorMessage,
+                                            style: TextStyle(
+                                              color: Colors.red.shade700,
+                                              fontSize: 14,
+                                              fontFamily: 'Geist',
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+
+                                const SizedBox(height: 40),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGoogleButton() {
+    return Container(
+      width: double.infinity,
+      height: 56,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(28),
+          onTap: _isGoogleLoading ? null : _signInWithGoogle,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_isGoogleLoading)
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor:
+                          AlwaysStoppedAnimation<Color>(Color(0xFF4F46E5)),
+                    ),
+                  )
+                else
+                  SvgPicture.asset(
+                    'assets/icons/google_logo.svg',
+                    width: 20,
+                    height: 20,
+                  ),
+                const SizedBox(width: 12),
+                const Text(
+                  'Continue with Google',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    fontFamily: 'Geist',
+                    color: Color(0xFF1F2937),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGuestButton() {
+    return Container(
+      width: double.infinity,
+      height: 56,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.3),
+          width: 1.5,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(28),
+          onTap: widget.onGuestMode,
+          child: const Center(
+            child: Text(
+              'Continue as a guest',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                fontFamily: 'Geist',
+                color: Colors.white,
               ),
             ),
           ),
@@ -391,4 +383,124 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
+}
+
+// Custom painter for organic shapes
+class OrganicShapesPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withOpacity(0.15)
+      ..style = PaintingStyle.fill;
+
+    // Create organic blob shapes
+    final path1 = Path();
+    path1.moveTo(size.width * 0.2, 0);
+    path1.quadraticBezierTo(
+      size.width * 0.4,
+      size.height * 0.2,
+      size.width * 0.8,
+      size.height * 0.15,
+    );
+    path1.quadraticBezierTo(
+      size.width * 1.2,
+      size.height * 0.1,
+      size.width * 1.0,
+      size.height * 0.5,
+    );
+    path1.quadraticBezierTo(
+      size.width * 0.8,
+      size.height * 0.8,
+      size.width * 0.3,
+      size.height * 0.7,
+    );
+    path1.quadraticBezierTo(
+      size.width * -0.1,
+      size.height * 0.6,
+      size.width * 0.0,
+      size.height * 0.3,
+    );
+    path1.quadraticBezierTo(
+      size.width * 0.1,
+      size.height * 0.1,
+      size.width * 0.2,
+      0,
+    );
+    path1.close();
+
+    canvas.drawPath(path1, paint);
+
+    // Second organic shape
+    final paint2 = Paint()
+      ..color = Colors.white.withOpacity(0.08)
+      ..style = PaintingStyle.fill;
+
+    final path2 = Path();
+    path2.moveTo(size.width * 0.6, size.height * 0.1);
+    path2.quadraticBezierTo(
+      size.width * 0.9,
+      size.height * 0.3,
+      size.width * 0.7,
+      size.height * 0.6,
+    );
+    path2.quadraticBezierTo(
+      size.width * 0.5,
+      size.height * 0.9,
+      size.width * 0.2,
+      size.height * 0.8,
+    );
+    path2.quadraticBezierTo(
+      size.width * -0.1,
+      size.height * 0.7,
+      size.width * 0.1,
+      size.height * 0.4,
+    );
+    path2.quadraticBezierTo(
+      size.width * 0.3,
+      size.height * 0.1,
+      size.width * 0.6,
+      size.height * 0.1,
+    );
+    path2.close();
+
+    canvas.drawPath(path2, paint2);
+
+    // Third smaller organic shape
+    final paint3 = Paint()
+      ..color = Colors.white.withOpacity(0.12)
+      ..style = PaintingStyle.fill;
+
+    final path3 = Path();
+    path3.moveTo(size.width * 0.8, size.height * 0.2);
+    path3.quadraticBezierTo(
+      size.width * 1.1,
+      size.height * 0.4,
+      size.width * 0.9,
+      size.height * 0.7,
+    );
+    path3.quadraticBezierTo(
+      size.width * 0.7,
+      size.height * 1.0,
+      size.width * 0.4,
+      size.height * 0.9,
+    );
+    path3.quadraticBezierTo(
+      size.width * 0.1,
+      size.height * 0.8,
+      size.width * 0.3,
+      size.height * 0.5,
+    );
+    path3.quadraticBezierTo(
+      size.width * 0.5,
+      size.height * 0.2,
+      size.width * 0.8,
+      size.height * 0.2,
+    );
+    path3.close();
+
+    canvas.drawPath(path3, paint3);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

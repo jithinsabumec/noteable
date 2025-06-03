@@ -13,8 +13,6 @@ class TimelineBoxNew extends StatelessWidget {
   final Function(String timestamp, int contentListIndex, int orderIndex,
       ItemType itemType, String content, String storageId,
       {bool? completed}) onShowItemOptions;
-  final RiveCheckboxController Function(String storageId)
-      getTaskCheckboxController;
 
   const TimelineBoxNew({
     super.key,
@@ -22,7 +20,6 @@ class TimelineBoxNew extends StatelessWidget {
     required this.timestamp,
     required this.onUpdateItem,
     required this.onShowItemOptions,
-    required this.getTaskCheckboxController,
   });
 
   // Time icon implementation using SVG assets
@@ -91,7 +88,6 @@ class TimelineBoxNew extends StatelessWidget {
       } else if (itemRef.type == ItemType.task) {
         if (itemRef.index < entry.tasks.length) {
           final task = entry.tasks[itemRef.index];
-          final controller = getTaskCheckboxController(itemRef.storageId);
 
           contentWidgets.add(
             TimelineTaskItem(
@@ -99,7 +95,6 @@ class TimelineBoxNew extends StatelessWidget {
               timestamp: timestamp,
               orderIndex: orderIndex,
               storageId: itemRef.storageId,
-              controller: controller,
               onUpdateItem: onUpdateItem,
               onShowItemOptions: onShowItemOptions,
               contentListIndex: itemRef.index,

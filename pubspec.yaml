@@ -41,6 +41,7 @@ dependencies:
   flutter_svg: ^2.0.9
   device_info_plus: ^9.1.2
   rive: ^0.13.20
+  audioplayers: ^6.0.0
   
   # Local storage
   hive: ^2.2.3
@@ -129,6 +130,7 @@ flutter:
   assets:
     - assets/icons/
     - assets/animations/
+    - assets/sounds/
     - assets/icons/google_logo.svg
     - assets/animations/tick.riv
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:noteable/services/storage_service.dart';
 import 'package:noteable/models/timeline_entry.dart' as models;
+import 'package:noteable/services/auth_service.dart';
 import '../services/deepseek_service.dart';
 import '../services/assembly_ai_service.dart';
 import '../models/timeline_models.dart';
@@ -55,9 +56,6 @@ class _MainScreenState extends State<MainScreen>
 
   // Flag to track if animations are visible or not
   bool _showAnimations = false;
-
-  // Map to store RiveCheckboxControllers for each task item
-  final Map<String, RiveCheckboxController> _taskCheckboxControllers = {};
 
   @override
   void initState() {
@@ -457,10 +455,42 @@ class _MainScreenState extends State<MainScreen>
 
     return Scaffold(
       backgroundColor: Colors.white,
-      floatingActionButton: SizedBox(
-        width: 600,
-        height: 250,
-        child: const RiveAnimationWidget(),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 40.0), // Move up by 40 pixels
+        child: Container(
+          width: 335, // Further reduced width to clip more from the sides
+          height: 70, // Further reduced height to clip more from top/bottom
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(35.0),
+          ),
+          child: ClipRect(
+            child: OverflowBox(
+              minWidth: 600, // Keep original Rive animation width
+              maxWidth: 600,
+              minHeight: 250, // Keep original Rive animation height
+              maxHeight: 250,
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Colors
+                        .red, // Red border to visualize the full animation area
+                    width: 3.0,
+                  ),
+                  borderRadius:
+                      BorderRadius.circular(16.0), // Match ClipRRect radius
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16.0),
+                  child: RiveAnimationWidget(
+                    timelineEntriesByDate: _timelineEntriesByDate,
+                    selectedDate: _selectedDate,
+                    onStateUpdate: () => setState(() {}),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       body: Stack(
@@ -480,7 +510,7 @@ class _MainScreenState extends State<MainScreen>
                     constraints: BoxConstraints(
                         minHeight: viewportConstraints.maxHeight),
                     child: Padding(
-                      padding: const EdgeInsets.only(top: 24.0, bottom: 24.0),
+                      padding: const EdgeInsets.only(top: 36.0, bottom: 24.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -525,7 +555,6 @@ class _MainScreenState extends State<MainScreen>
                             child: TimelineRenderer(
                               timelineEntriesByDate: _timelineEntriesByDate,
                               selectedDate: _selectedDate,
-                              taskCheckboxControllers: _taskCheckboxControllers,
                               onUpdateItem: _updateItemWrapper,
                               onShowItemOptions: _showItemOptionsWrapper,
                             ),
@@ -577,6 +606,22 @@ class _MainScreenState extends State<MainScreen>
                     ],
                   ),
                 ),
+              ),
+            ),
+
+          // Add temporary debug button for testing
+          if (false) // Set to false to hide after testing
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pushNamed(context, '/debug_audio');
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('🧪 Test Audio Visualizer'),
               ),
             ),
         ],

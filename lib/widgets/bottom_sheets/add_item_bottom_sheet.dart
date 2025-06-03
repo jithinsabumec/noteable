@@ -89,7 +89,7 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
         bottom: MediaQuery.of(context).viewInsets.bottom,
         left: 24,
         right: 24,
-        top: 16,
+        top: 10,
       ),
       child: SingleChildScrollView(
         child: Column(
@@ -99,15 +99,15 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
             // Drag handle
             Center(
               child: Container(
-                width: 40,
-                height: 5,
+                width: 60,
+                height: 4,
                 decoration: BoxDecoration(
                   color: Colors.grey[300],
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
 
             // Segmented Control (Notes/Tasks) - with animated background
             LayoutBuilder(
@@ -122,16 +122,11 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
                     color: const Color(0xFFEEEEEE),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE4E4E4)),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x19000000),
-                        blurRadius: 17.60,
-                        offset: Offset(0, 4),
-                        spreadRadius: 0,
-                      )
-                    ],
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: const Color(0xFFE4E4E4),
+                      width: 1,
+                    ),
                   ),
                   height: 46, // Fixed height for the container
                   child: Stack(
@@ -145,18 +140,16 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                             : tabWidth + gap, // Add gap for Tasks position
                         top: 0,
                         bottom: 0,
-                        width: tabWidth, // Equal width for both tabs
+                        width: tabWidth -
+                            2, // Slightly reduce width to ensure proper right padding
                         child: Container(
                           decoration: BoxDecoration(
                             color: Colors.white,
-                            borderRadius: BorderRadius.circular(6),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.05),
-                                blurRadius: 5,
-                                offset: const Offset(0, 2),
-                              )
-                            ],
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: const Color(0xFFE1E1E1),
+                              width: 1,
+                            ),
                           ),
                         ),
                       ),
@@ -186,8 +179,8 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                                   children: [
                                     SvgPicture.asset(
                                       'assets/icons/notes.svg',
-                                      width: 18,
-                                      height: 18,
+                                      width: 12,
+                                      height: 12,
                                       colorFilter: ColorFilter.mode(
                                         selectedType == 'Notes'
                                             ? Colors.black
@@ -234,8 +227,8 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                                   children: [
                                     SvgPicture.asset(
                                       'assets/icons/tasks.svg',
-                                      width: 18,
-                                      height: 18,
+                                      width: 14,
+                                      height: 14,
                                       colorFilter: ColorFilter.mode(
                                         selectedType == 'Tasks'
                                             ? Colors.black
@@ -266,7 +259,7 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                 );
               },
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 4),
 
             // Text Field(s) and "Add new note" button
             Column(
@@ -284,7 +277,7 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                       fontFamily: 'Geist',
-                      color: Color(0xFF4B4B4B),
+                      color: Color(0xFF2D2D2D),
                     ),
                   ),
                 ),
@@ -295,10 +288,15 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                 ListView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
+                  padding: EdgeInsets.zero,
                   itemCount: textControllers.length,
                   itemBuilder: (context, index) {
                     return Padding(
-                      padding: const EdgeInsets.only(bottom: 8.0),
+                      padding: EdgeInsets.only(
+                        bottom: index < textControllers.length - 1
+                            ? 8.0
+                            : 0.0, // Only add padding if not the last item
+                      ),
                       child: TextField(
                         key: ValueKey(
                             'textfield_${index}_${textControllers[index].hashCode}'),
@@ -306,6 +304,7 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                         focusNode: focusNodes[index],
                         minLines: 3,
                         maxLines: 5,
+                        textAlignVertical: TextAlignVertical.center,
                         decoration: InputDecoration(
                           hintText: selectedType == 'Notes'
                               ? "I've been thinking about..."
@@ -314,21 +313,21 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                           fillColor: const Color(0xFFF9F9F9),
                           filled: true,
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(12),
                             borderSide: const BorderSide(
                               color: Color(0xFFE1E1E1),
                               width: 1.0,
                             ),
                           ),
                           enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(12),
                             borderSide: const BorderSide(
                               color: Color(0xFFE1E1E1),
                               width: 1.0,
                             ),
                           ),
                           focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(12),
                             borderSide: const BorderSide(
                               color: Color(0xFFE1E1E1),
                               width: 1.0,
@@ -344,6 +343,8 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                   },
                 ),
 
+                const SizedBox(height: 8), // Add 8 pixels spacing
+
                 // Add new note button
                 Center(
                   child: TextButton(
@@ -356,24 +357,22 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                       backgroundColor: const Color(0xFFFFFFFF),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
-                        side: const BorderSide(
-                            color: Color(0xFFE1E1E1), width: 1.0),
                       ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
                         const Icon(Icons.add,
-                            color: Color(0xFF858585), size: 20),
-                        const SizedBox(width: 6),
+                            color: Color(0xFF2D2D2D), size: 20),
+                        const SizedBox(width: 4),
                         Text(
                           selectedType == 'Notes'
                               ? 'Add new note'
                               : 'Add new task',
                           style: const TextStyle(
-                            color: Color(0xFF848484),
+                            color: Color(0xFF2D2D2D),
                             fontFamily: 'Geist',
-                            fontSize: 14,
+                            fontSize: 16,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -384,7 +383,7 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
               ],
             ),
 
-            const SizedBox(height: 48),
+            const SizedBox(height: 32),
 
             // Bottom Action Buttons
             Row(
@@ -403,7 +402,7 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                       foregroundColor: const Color(0xFF4B4B4B),
                       side: BorderSide(color: Colors.grey.shade300),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(24),
                       ),
                     ),
                     child: const Text('Cancel'),
@@ -422,7 +421,7 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                       backgroundColor: Colors.black,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(24),
                       ),
                     ),
                     child:
@@ -432,7 +431,7 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
               ],
             ),
             const SizedBox(height: 16),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24), // Additional bottom spacing
           ],
         ),
       ),
@@ -451,9 +450,15 @@ void showAddItemBottomSheet({
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.white,
+    useRootNavigator: false,
+    isDismissible: true,
+    enableDrag: true,
+    showDragHandle: false,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
+    clipBehavior: Clip.antiAliasWithSaveLayer,
+    transitionAnimationController: null, // Use default slide animation
     builder: (BuildContext context) {
       return AddItemBottomSheet(
         initialTab: initialTab,

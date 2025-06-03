@@ -5,12 +5,14 @@ import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:noteable/services/storage_service.dart';
+import 'package:noteable/services/auth_service.dart';
 import 'package:rive/rive.dart' as rive;
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'screens/auth_wrapper.dart';
 import 'screens/main_screen.dart';
+import 'widgets/rive_audio_visualizer.dart';
 
 void main() async {
   // Ensure Flutter is properly initialized with all bindings

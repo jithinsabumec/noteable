@@ -7,7 +7,6 @@ import 'timeline_empty_state.dart';
 class TimelineRenderer extends StatelessWidget {
   final Map<String, List<TimelineEntry>> timelineEntriesByDate;
   final DateTime selectedDate;
-  final Map<String, RiveCheckboxController> taskCheckboxControllers;
   final Function(String timestamp, int orderIndex, ItemType itemType,
       String content, bool completed, String storageId) onUpdateItem;
   final Function(String timestamp, int contentListIndex, int orderIndex,
@@ -18,16 +17,9 @@ class TimelineRenderer extends StatelessWidget {
     super.key,
     required this.timelineEntriesByDate,
     required this.selectedDate,
-    required this.taskCheckboxControllers,
     required this.onUpdateItem,
     required this.onShowItemOptions,
   });
-
-  // Helper to get or create a RiveCheckboxController for a task
-  RiveCheckboxController _getTaskCheckboxController(String storageId) {
-    return taskCheckboxControllers.putIfAbsent(
-        storageId, () => RiveCheckboxController());
-  }
 
   // Compare timestamps for sorting
   int _compareTimestamps(String a, String b) {
@@ -74,7 +66,6 @@ class TimelineRenderer extends StatelessWidget {
           timestamp: timestamp,
           onUpdateItem: onUpdateItem,
           onShowItemOptions: onShowItemOptions,
-          getTaskCheckboxController: _getTaskCheckboxController,
         );
       }).toList(),
     );

@@ -131,14 +131,14 @@ class WeekdaySelector extends StatelessWidget {
                               ),
                               const SizedBox(height: 4),
                               Container(
-                                width: 30,
-                                height: 30,
+                                width: 32,
+                                height: 32,
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   color: isSelectedDay && !isFuture
                                       ? selectionColor // Use dynamic selection color
                                       : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(9),
+                                  borderRadius: BorderRadius.circular(16),
                                 ),
                                 child: Text(
                                   '${dayDate.day}',

@@ -25,46 +25,9 @@ class _AuthWrapperState extends State<AuthWrapper> {
   Widget build(BuildContext context) {
     final AuthService authService = AuthService();
 
-    // If guest mode is enabled, show the main app with guest mode indicator
+    // If guest mode is enabled, show the main app without indicator
     if (_isGuestMode) {
-      return Stack(
-        children: [
-          widget.child,
-          // Guest mode indicator
-          Positioned(
-            top: 50,
-            left: 24,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.orange.shade100,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.orange.shade300),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.person_outline,
-                    size: 14,
-                    color: Colors.orange.shade700,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Guest Mode',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.orange.shade700,
-                      fontFamily: 'Geist',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
+      return widget.child;
     }
 
     return StreamBuilder<User?>(

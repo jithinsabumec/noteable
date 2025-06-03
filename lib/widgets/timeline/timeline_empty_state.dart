@@ -49,24 +49,27 @@ class TimelineEmptyState extends StatelessWidget {
         return SizedBox(
           height: availableHeight,
           child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SvgPicture.asset(
-                  'assets/icons/home-emptystate.svg',
-                  width: 219,
-                  height: 137,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  emptyStateText,
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey.shade600,
-                    fontFamily: 'Geist',
+            child: Transform.translate(
+              offset: const Offset(0, 180), // Move up 20px from center
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.start,
+                children: [
+                  SvgPicture.asset(
+                    'assets/icons/home-emptystate.svg',
+                    width: 219,
+                    height: 137,
                   ),
-                ),
-              ],
+                  const SizedBox(height: 16),
+                  Text(
+                    emptyStateText,
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey.shade600,
+                      fontFamily: 'Geist',
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
