@@ -42,6 +42,7 @@ dependencies:
   device_info_plus: ^9.1.2
   rive: ^0.13.20
   audioplayers: ^6.0.0
+  shared_preferences: ^2.2.2
   
   # Local storage
   hive: ^2.2.3
@@ -49,6 +50,7 @@ dependencies:
   firebase_core: ^3.13.0
   firebase_auth: ^5.5.4
   google_sign_in: ^6.3.0
+  google_fonts: ^6.1.0
 
 dev_dependencies:
   flutter_test:
@@ -129,6 +131,7 @@ flutter:
 
   assets:
     - assets/icons/
+    - assets/images/
     - assets/animations/
     - assets/sounds/
     - assets/icons/google_logo.svg

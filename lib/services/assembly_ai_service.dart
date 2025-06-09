@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import '../config.dart';
 
 class AssemblyAIService {
@@ -9,27 +10,27 @@ class AssemblyAIService {
   // Upload audio file and get transcription
   Future<String> transcribeAudio(String filePath) async {
     try {
-      print('Starting AssemblyAI transcription for: $filePath');
+      debugPrint('Starting AssemblyAI transcription for: $filePath');
 
       // Step 1: Upload the audio file
-      print('Step 1: Uploading audio file...');
+      debugPrint('Step 1: Uploading audio file...');
       final uploadUrl = await _uploadAudioFile(filePath);
-      print('Upload successful. URL: $uploadUrl');
+      debugPrint('Upload successful. URL: $uploadUrl');
 
       // Step 2: Request transcription
-      print('Step 2: Requesting transcription...');
+      debugPrint('Step 2: Requesting transcription...');
       final transcriptId = await _requestTranscription(uploadUrl);
-      print('Transcription requested. ID: $transcriptId');
+      debugPrint('Transcription requested. ID: $transcriptId');
 
       // Step 3: Poll for completion and get result
-      print('Step 3: Polling for completion...');
+      debugPrint('Step 3: Polling for completion...');
       final transcriptionText = await _getTranscriptionResult(transcriptId);
-      print(
+      debugPrint(
           'Transcription completed. Length: ${transcriptionText.length} characters');
 
       return transcriptionText;
     } catch (e) {
-      print('AssemblyAI transcription error: $e');
+      debugPrint('AssemblyAI transcription error: $e');
       throw Exception('Failed to transcribe audio: $e');
     }
   }
@@ -43,7 +44,7 @@ class AssemblyAIService {
 
     final bytes = await file.readAsBytes();
     final fileSizeKB = (bytes.length / 1024).round();
-    print(
+    debugPrint(
         'Audio file details: Path=$filePath, Size=${fileSizeKB}KB, Format=${filePath.split('.').last}');
 
     final response = await http.post(
@@ -57,11 +58,11 @@ class AssemblyAIService {
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
-      print('Upload response: ${response.body}');
+      debugPrint('Upload response: ${response.body}');
       return data['upload_url'];
     } else {
-      print('Upload failed with status ${response.statusCode}');
-      print('Upload error response: ${response.body}');
+      debugPrint('Upload failed with status ${response.statusCode}');
+      debugPrint('Upload error response: ${response.body}');
       throw Exception(
           'Failed to upload audio file: ${response.statusCode} - ${response.body}');
     }
@@ -83,11 +84,12 @@ class AssemblyAIService {
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
-      print('Transcription request response: ${response.body}');
+      debugPrint('Transcription request response: ${response.body}');
       return data['id'];
     } else {
-      print('Transcription request failed with status ${response.statusCode}');
-      print('Transcription request error response: ${response.body}');
+      debugPrint(
+          'Transcription request failed with status ${response.statusCode}');
+      debugPrint('Transcription request error response: ${response.body}');
       throw Exception(
           'Failed to request transcription: ${response.statusCode} - ${response.body}');
     }
@@ -110,11 +112,11 @@ class AssemblyAIService {
         final data = json.decode(response.body);
         final status = data['status'];
 
-        print('Polling attempt ${attempts + 1}: Status = $status');
+        debugPrint('Polling attempt ${attempts + 1}: Status = $status');
 
         if (status == 'completed') {
           final text = data['text'] ?? '';
-          print(
+          debugPrint(
               'Transcription completed successfully. Text: ${text.substring(0, text.length > 100 ? 100 : text.length)}...');
           return text;
         } else if (status == 'error') {

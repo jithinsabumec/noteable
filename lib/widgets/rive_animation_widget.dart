@@ -5,9 +5,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../services/assembly_ai_service.dart';
-import '../services/deepseek_service.dart';
+import '../services/ai_analysis_service.dart';
 import '../services/storage_service.dart';
 import '../services/item_management_service.dart';
+import '../services/guest_mode_service.dart';
 import '../models/timeline_models.dart';
 import '../widgets/bottom_sheets/add_item_bottom_sheet.dart';
 import 'dart:io';
@@ -17,12 +18,18 @@ class RiveAnimationWidget extends StatefulWidget {
   final Map<String, List<TimelineEntry>> timelineEntriesByDate;
   final DateTime selectedDate;
   final Function() onStateUpdate;
+  final bool isGuestMode;
+  final GuestModeService? guestModeService;
+  final VoidCallback? onGuestRecordingCountUpdate;
 
   const RiveAnimationWidget({
     super.key,
     required this.timelineEntriesByDate,
     required this.selectedDate,
     required this.onStateUpdate,
+    this.isGuestMode = false,
+    this.guestModeService,
+    this.onGuestRecordingCountUpdate,
   });
 
   @override
@@ -37,7 +44,7 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
   // Audio services
   final _audioRecorder = AudioRecorder();
   final _assemblyAIService = AssemblyAIService();
-  final _deepseekService = DeepseekService();
+  final _aiAnalysisService = AIAnalysisService();
   final _storageService = StorageService();
   final _itemManagementService = ItemManagementService();
 
@@ -50,6 +57,10 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
   bool _isTranscribing = false;
   bool _isAnalyzing = false;
   String _transcribedText = '';
+
+  // Error tracking
+  String? _lastError;
+  bool _hasProcessingError = false;
 
   // Rive inputs
   SMIInput<bool>? _isRecordInput;
@@ -106,10 +117,10 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
 
   // Monitor isRecord state changes to detect when recording should start/stop
   void _startIsRecordMonitoring() {
-    bool _previousIsRecord = false; // Track previous isRecord state
-    bool _previousIsSubmit = false; // Track previous isSubmit state
-    bool _previousTaskSelected = false; // Track previous taskSelected state
-    bool _previousNoteSelected = false; // Track previous noteSelected state
+    bool previousIsRecord = false; // Track previous isRecord state
+    bool previousIsSubmit = false; // Track previous isSubmit state
+    bool previousTaskSelected = false; // Track previous taskSelected state
+    bool previousNoteSelected = false; // Track previous noteSelected state
 
     // Check both input states every 100ms
     _monitoringTimer =
@@ -127,7 +138,7 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       // Only act on state changes, not continuous states
 
       // Handle isRecord state changes
-      if (currentIsRecord != _previousIsRecord) {
+      if (currentIsRecord != previousIsRecord) {
         if (currentIsRecord &&
             !_isRecording &&
             !_isTranscribing &&
@@ -142,33 +153,33 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
           // Stop recording when isRecord becomes false
           _stopRecording();
         }
-        _previousIsRecord = currentIsRecord;
+        previousIsRecord = currentIsRecord;
       }
 
       // Process recording when isSubmit becomes true (and we're recording)
-      if (currentIsSubmit != _previousIsSubmit) {
+      if (currentIsSubmit != previousIsSubmit) {
         if (currentIsSubmit && _isRecording) {
           // Play end recording sound immediately
           unawaited(_playEndRecordingSound());
           _stopRecording();
         }
-        _previousIsSubmit = currentIsSubmit;
+        previousIsSubmit = currentIsSubmit;
       }
 
       // Handle taskSelected state changes
-      if (currentTaskSelected != _previousTaskSelected) {
+      if (currentTaskSelected != previousTaskSelected) {
         if (currentTaskSelected) {
           _showTaskBottomSheet();
         }
-        _previousTaskSelected = currentTaskSelected;
+        previousTaskSelected = currentTaskSelected;
       }
 
       // Handle noteSelected state changes
-      if (currentNoteSelected != _previousNoteSelected) {
+      if (currentNoteSelected != previousNoteSelected) {
         if (currentNoteSelected) {
           _showNoteBottomSheet();
         }
-        _previousNoteSelected = currentNoteSelected;
+        previousNoteSelected = currentNoteSelected;
       }
     });
   }
@@ -184,6 +195,15 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
 
     if (_isTranscribing || _isAnalyzing) {
       return;
+    }
+
+    // Check guest mode recording limits
+    if (widget.isGuestMode && widget.guestModeService != null) {
+      final canRecord = await widget.guestModeService!.canRecord();
+      if (!canRecord) {
+        // Show a message that guest mode limit has been reached
+        return;
+      }
     }
 
     try {
@@ -283,28 +303,41 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       setState(() {
         _isTranscribing = true;
         _isAnalyzing = false;
+        _hasProcessingError = false;
+        _lastError = null;
       });
 
       try {
+        debugPrint('🎙️ Starting transcription for: $filePath');
         _transcribedText = await _assemblyAIService.transcribeAudio(filePath);
+        debugPrint(
+            '✅ Transcription successful. Length: ${_transcribedText.length} characters');
+        debugPrint('📝 Transcribed text: $_transcribedText');
 
         if (_transcribedText.trim().isEmpty) {
           throw Exception(
               'Transcription returned empty text - no speech detected');
         }
       } catch (e) {
+        debugPrint('❌ Transcription failed: $e');
         throw Exception('Transcription failed: $e');
       }
 
       // Continue with AI analysis
       await _processTranscriptionResult();
     } catch (e) {
+      debugPrint('❌ Processing failed: $e');
       if (!mounted) return;
 
       setState(() {
         _isTranscribing = false;
         _isAnalyzing = false;
+        _hasProcessingError = true;
+        _lastError = e.toString();
       });
+
+      // Show error to user
+      _showErrorSnackBar('Recording processing failed: ${e.toString()}');
 
       // Set isDone to true even on error to stop loading animation
       if (_isDoneInput != null) {
@@ -319,17 +352,44 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
   Future<void> _processTranscriptionResult() async {
     if (!mounted) return;
 
-    // Step 2: Analyze with DeepSeek
+    // Step 2: Analyze with Mistral
     setState(() {
       _isTranscribing = false;
       _isAnalyzing = true;
     });
 
     try {
+      debugPrint('🤖 Starting AI analysis with Mistral...');
+      debugPrint('📝 Text to analyze: $_transcribedText');
+
       final result =
-          await _deepseekService.analyzeTranscription(_transcribedText);
+          await _aiAnalysisService.analyzeTranscription(_transcribedText);
+
+      debugPrint('✅ AI analysis completed');
+      debugPrint('📊 Analysis result: $result');
 
       if (!mounted) return;
+
+      // Validate result structure
+      if ((!result.containsKey('notes') && !result.containsKey('tasks'))) {
+        throw Exception('Invalid response format from AI analysis');
+      }
+
+      // Check if we got any content
+      final hasNotes =
+          result['notes'] != null && (result['notes'] as List).isNotEmpty;
+      final hasTasks =
+          result['tasks'] != null && (result['tasks'] as List).isNotEmpty;
+
+      if (!hasNotes && !hasTasks) {
+        debugPrint('⚠️ No notes or tasks extracted from transcription');
+        // Still proceed to show completion, but with a different message
+        _showInfoSnackBar(
+            'Audio transcribed successfully, but no actionable items were found.');
+      } else {
+        debugPrint(
+            '📝 Found ${result['notes']?.length ?? 0} notes and ${result['tasks']?.length ?? 0} tasks');
+      }
 
       // Step 3: Add to timeline using ItemManagementService
       await _addToTimeline(result);
@@ -340,6 +400,8 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       setState(() {
         _isTranscribing = false;
         _isAnalyzing = false;
+        _hasProcessingError = false;
+        _lastError = null;
       });
 
       // Set isDone to true to indicate completion
@@ -347,14 +409,26 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
         _isDoneInput!.value = true;
       }
 
+      // Show success message
+      if (hasNotes || hasTasks) {
+        _showSuccessSnackBar(
+            'Successfully added ${result['notes']?.length ?? 0} notes and ${result['tasks']?.length ?? 0} tasks!');
+      }
+
       // Schedule a reset after the completion animation finishes
       _scheduleStateReset();
     } catch (e) {
+      debugPrint('❌ AI analysis failed: $e');
       if (mounted) {
         setState(() {
           _isTranscribing = false;
           _isAnalyzing = false;
+          _hasProcessingError = true;
+          _lastError = e.toString();
         });
+
+        // Show error to user
+        _showErrorSnackBar('AI analysis failed: ${e.toString()}');
 
         // Set isDone to true even on error
         if (_isDoneInput != null) {
@@ -369,28 +443,63 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
   }
 
   Future<void> _addToTimeline(Map<String, dynamic> result) async {
-    // Add notes to timeline
-    if (result['notes'] != null && result['notes'].isNotEmpty) {
-      for (final note in result['notes']) {
-        _itemManagementService.createNoteEntry(
-          noteText: note,
-          selectedDate: widget.selectedDate,
-          timelineEntriesByDate: widget.timelineEntriesByDate,
-          onStateUpdate: widget.onStateUpdate,
-        );
-      }
-    }
+    try {
+      debugPrint('📅 Adding items to timeline...');
 
-    // Add tasks to timeline
-    if (result['tasks'] != null && result['tasks'].isNotEmpty) {
-      for (final task in result['tasks']) {
-        _itemManagementService.createTaskEntry(
-          taskText: task,
-          selectedDate: widget.selectedDate,
-          timelineEntriesByDate: widget.timelineEntriesByDate,
-          onStateUpdate: widget.onStateUpdate,
-        );
+      int notesAdded = 0;
+      int tasksAdded = 0;
+
+      // Add notes to timeline
+      if (result['notes'] != null && result['notes'].isNotEmpty) {
+        final notes = List<String>.from(result['notes']);
+        debugPrint('📝 Adding ${notes.length} notes: $notes');
+
+        for (final note in notes) {
+          if (note.trim().isNotEmpty) {
+            _itemManagementService.createNoteEntry(
+              noteText: note.trim(),
+              selectedDate: widget.selectedDate,
+              timelineEntriesByDate: widget.timelineEntriesByDate,
+              onStateUpdate: widget.onStateUpdate,
+            );
+            notesAdded++;
+            debugPrint('✅ Added note: ${note.trim()}');
+          }
+        }
       }
+
+      // Add tasks to timeline
+      if (result['tasks'] != null && result['tasks'].isNotEmpty) {
+        final tasks = List<String>.from(result['tasks']);
+        debugPrint('✅ Adding ${tasks.length} tasks: $tasks');
+
+        for (final task in tasks) {
+          if (task.trim().isNotEmpty) {
+            _itemManagementService.createTaskEntry(
+              taskText: task.trim(),
+              selectedDate: widget.selectedDate,
+              timelineEntriesByDate: widget.timelineEntriesByDate,
+              onStateUpdate: widget.onStateUpdate,
+            );
+            tasksAdded++;
+            debugPrint('✅ Added task: ${task.trim()}');
+          }
+        }
+      }
+
+      debugPrint(
+          '✅ Successfully added $notesAdded notes and $tasksAdded tasks to timeline');
+
+      // Increment guest mode recording count if in guest mode and processing was successful
+      if (widget.isGuestMode && widget.guestModeService != null) {
+        await widget.guestModeService!.incrementRecordingCount();
+        // Update the UI counter
+        widget.onGuestRecordingCountUpdate?.call();
+        debugPrint('✅ Incremented guest mode recording count');
+      }
+    } catch (e) {
+      debugPrint('❌ Failed to add items to timeline: $e');
+      throw Exception('Failed to add items to timeline: $e');
     }
   }
 
@@ -541,5 +650,46 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
     }
 
     return anim!;
+  }
+
+  // Helper methods for user feedback
+  void _showErrorSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: 'Dismiss',
+          textColor: Colors.white,
+          onPressed: () {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showSuccessSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  void _showInfoSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.blue,
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 }

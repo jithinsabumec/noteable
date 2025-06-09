@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../models/timeline_models.dart';
-import '../rive_checkbox.dart';
 import 'timeline_task_item.dart';
 import 'timeline_note_item.dart';
 

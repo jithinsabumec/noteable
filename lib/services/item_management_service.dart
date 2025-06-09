@@ -1,6 +1,7 @@
 import 'package:noteable/services/storage_service.dart';
 import 'package:noteable/models/timeline_entry.dart' as models;
 import '../models/timeline_models.dart';
+import 'package:flutter/foundation.dart';
 
 class ItemManagementService {
   final StorageService _storageService = StorageService();
@@ -73,6 +74,10 @@ class ItemManagementService {
     required Map<String, List<TimelineEntry>> timelineEntriesByDate,
     required Function() onStateUpdate,
   }) {
+    debugPrint('📝 ItemManagementService: Creating note entry...');
+    debugPrint('   Note text: "$noteText"');
+    debugPrint('   Selected date: $selectedDate');
+
     final now = DateTime.now();
     final hour = now.hour > 12
         ? now.hour - 12
@@ -84,6 +89,8 @@ class ItemManagementService {
     final timestamp = '$hour:$minute $ampm';
     final isDaytime = now.hour >= 6 && now.hour < 18;
 
+    debugPrint('   Timestamp: $timestamp');
+
     // Create a new timeline entry for storage
     final storageEntry = models.TimelineEntry(
       id: _storageService.generateId(),
@@ -93,13 +100,22 @@ class ItemManagementService {
       completed: false,
     );
 
-    // Save to storage
-    _storageService.saveEntry(storageEntry);
+    debugPrint('   Storage entry ID: ${storageEntry.id}');
+
+    try {
+      // Save to storage
+      _storageService.saveEntry(storageEntry);
+      debugPrint('✅ Successfully saved note to storage');
+    } catch (e) {
+      debugPrint('❌ Failed to save note to storage: $e');
+      rethrow;
+    }
 
     // Update UI
     final existingUiEntry = timelineEntriesByDate[timestamp]?.first;
 
     if (existingUiEntry != null) {
+      debugPrint('   Adding to existing UI entry for timestamp: $timestamp');
       // Add to existing entry for this timestamp
       final newNoteIndex = existingUiEntry.notes.length;
       existingUiEntry.notes.add(noteText);
@@ -107,7 +123,9 @@ class ItemManagementService {
           type: ItemType.note,
           index: newNoteIndex,
           storageId: storageEntry.id));
+      debugPrint('   Added at note index: $newNoteIndex');
     } else {
+      debugPrint('   Creating new UI entry for timestamp: $timestamp');
       // Create new entry for this timestamp
       const newNoteIndex = 0;
       final newUiEntry = TimelineEntry(
@@ -123,9 +141,20 @@ class ItemManagementService {
         ],
       );
       timelineEntriesByDate[timestamp] = [newUiEntry];
+      debugPrint('   Created new UI entry with note at index: $newNoteIndex');
     }
 
-    onStateUpdate();
+    debugPrint(
+        '   Current timeline entries: ${timelineEntriesByDate.keys.toList()}');
+
+    try {
+      onStateUpdate();
+      debugPrint('✅ Successfully called onStateUpdate()');
+    } catch (e) {
+      debugPrint('❌ Error in onStateUpdate(): $e');
+    }
+
+    debugPrint('✅ Note entry creation completed');
   }
 
   // Create a new task entry with the current timestamp
@@ -135,6 +164,10 @@ class ItemManagementService {
     required Map<String, List<TimelineEntry>> timelineEntriesByDate,
     required Function() onStateUpdate,
   }) {
+    debugPrint('✅ ItemManagementService: Creating task entry...');
+    debugPrint('   Task text: "$taskText"');
+    debugPrint('   Selected date: $selectedDate');
+
     final now = DateTime.now();
     final hour = now.hour > 12
         ? now.hour - 12
@@ -146,6 +179,8 @@ class ItemManagementService {
     final timestamp = '$hour:$minute $ampm';
     final isDaytime = now.hour >= 6 && now.hour < 18;
 
+    debugPrint('   Timestamp: $timestamp');
+
     // Create a new timeline entry for storage
     final storageEntry = models.TimelineEntry(
       id: _storageService.generateId(),
@@ -155,13 +190,22 @@ class ItemManagementService {
       completed: false,
     );
 
-    // Save to storage
-    _storageService.saveEntry(storageEntry);
+    debugPrint('   Storage entry ID: ${storageEntry.id}');
+
+    try {
+      // Save to storage
+      _storageService.saveEntry(storageEntry);
+      debugPrint('✅ Successfully saved task to storage');
+    } catch (e) {
+      debugPrint('❌ Failed to save task to storage: $e');
+      rethrow;
+    }
 
     // Update UI
     final existingUiEntry = timelineEntriesByDate[timestamp]?.first;
 
     if (existingUiEntry != null) {
+      debugPrint('   Adding to existing UI entry for timestamp: $timestamp');
       // Add to existing entry for this timestamp
       final newTaskIndex = existingUiEntry.tasks.length;
       existingUiEntry.tasks.add(TaskItem(
@@ -172,7 +216,9 @@ class ItemManagementService {
           type: ItemType.task,
           index: newTaskIndex,
           storageId: storageEntry.id));
+      debugPrint('   Added at task index: $newTaskIndex');
     } else {
+      debugPrint('   Creating new UI entry for timestamp: $timestamp');
       // Create new entry for this timestamp
       const newTaskIndex = 0;
       final newUiEntry = TimelineEntry(
@@ -193,9 +239,20 @@ class ItemManagementService {
         ],
       );
       timelineEntriesByDate[timestamp] = [newUiEntry];
+      debugPrint('   Created new UI entry with task at index: $newTaskIndex');
     }
 
-    onStateUpdate();
+    debugPrint(
+        '   Current timeline entries: ${timelineEntriesByDate.keys.toList()}');
+
+    try {
+      onStateUpdate();
+      debugPrint('✅ Successfully called onStateUpdate()');
+    } catch (e) {
+      debugPrint('❌ Error in onStateUpdate(): $e');
+    }
+
+    debugPrint('✅ Task entry creation completed');
   }
 
   // Delete a note or task

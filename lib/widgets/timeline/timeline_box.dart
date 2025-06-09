@@ -86,9 +86,9 @@ class TimelineBox extends StatelessWidget {
 
     // Wrap the entire box in a DragTarget
     return DragTarget<Map<String, dynamic>>(
-      onWillAccept: (data) => true,
-      onAccept: (data) {
-        onItemDrop(data, timestamp);
+      onWillAcceptWithDetails: (data) => true,
+      onAcceptWithDetails: (data) {
+        onItemDrop(data.data, timestamp);
       },
       builder: (context, candidateData, rejectedData) {
         return Container(

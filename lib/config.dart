@@ -4,8 +4,9 @@ class Config {
     defaultValue: '62e8e9b15cef4e42a42bd4b5849faada',
   );
 
-  static const String deepseekAPIKey = String.fromEnvironment(
-    'DEEPSEEK_API_KEY',
-    defaultValue: 'sk-1ef8bd82e1cd4a64a2c1a687a5117743',
+  static const String openRouterAPIKey = String.fromEnvironment(
+    'OPENROUTER_API_KEY',
+    defaultValue:
+        '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',
   );
 }

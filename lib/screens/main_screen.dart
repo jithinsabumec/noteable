@@ -3,22 +3,27 @@ import 'dart:async';
 import 'package:noteable/services/storage_service.dart';
 import 'package:noteable/models/timeline_entry.dart' as models;
 import 'package:noteable/services/auth_service.dart';
-import '../services/deepseek_service.dart';
+import 'package:noteable/services/guest_mode_service.dart';
+import '../services/ai_analysis_service.dart';
 import '../services/assembly_ai_service.dart';
 import '../models/timeline_models.dart';
 import '../widgets/timeline/weekday_selector.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
-import '../widgets/rive_checkbox.dart';
 import '../utils/date_formatter.dart';
 import '../widgets/rive_animation_widget.dart';
 import '../widgets/bottom_sheets/add_item_bottom_sheet.dart';
 import '../widgets/timeline/timeline_renderer.dart';
+import '../widgets/guest_recording_counter.dart';
 import 'recording_screen.dart';
+import 'subscription_screen.dart';
 import '../services/item_management_service.dart';
 import '../widgets/dialogs/item_options_dialog.dart';
 
 class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+  final bool isGuestMode;
+
+  const MainScreen({super.key, required this.isGuestMode});
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -37,11 +42,14 @@ class _MainScreenState extends State<MainScreen>
   final _storageService = StorageService();
   // Use the new item management service
   final _itemManagementService = ItemManagementService();
+  // Guest mode service
+  final _guestModeService = GuestModeService();
+
   // Map to store entries by timestamp for the currently selected date
   final Map<String, List<TimelineEntry>> _timelineEntriesByDate = {};
 
   // Recording and animation state
-  final _deepseekService = DeepseekService();
+  final _aiAnalysisService = AIAnalysisService();
   final _assemblyAIService = AssemblyAIService();
   String _transcribedText = '';
   bool _isTranscribing = false;
@@ -57,6 +65,12 @@ class _MainScreenState extends State<MainScreen>
   // Flag to track if animations are visible or not
   bool _showAnimations = false;
 
+  // Guest mode recording count state
+  int _guestRecordingCount = 0;
+
+  // Add AuthService instance
+  final _authService = AuthService();
+
   @override
   void initState() {
     super.initState();
@@ -71,6 +85,11 @@ class _MainScreenState extends State<MainScreen>
 
     // Load entries for the current date
     _loadEntriesForSelectedDate();
+
+    // Load guest recording count if in guest mode
+    if (widget.isGuestMode) {
+      _loadGuestRecordingCount();
+    }
   }
 
   @override
@@ -146,6 +165,47 @@ class _MainScreenState extends State<MainScreen>
 
     // Debug print to verify entries are loaded
     debugPrint('Loaded ${sEntries.length} entries for $_selectedDate');
+  }
+
+  // Load guest mode recording count
+  Future<void> _loadGuestRecordingCount() async {
+    if (!widget.isGuestMode) return;
+
+    final count = await _guestModeService.getRecordingCount();
+    if (mounted) {
+      setState(() {
+        _guestRecordingCount = count;
+      });
+    }
+  }
+
+  // Sign out the user
+  Future<void> _signOut() async {
+    try {
+      await _authService.signOut();
+      // The AuthWrapper will automatically handle the UI transition back to login screen
+    } catch (e) {
+      // Show error dialog if signout fails
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text('Sign Out Error'),
+              content: Text('Failed to sign out: ${e.toString()}'),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('OK'),
+                ),
+              ],
+            );
+          },
+        );
+      }
+    }
   }
 
   void _onDateSelected(DateTime date) {
@@ -383,8 +443,8 @@ class _MainScreenState extends State<MainScreen>
         return;
       }
 
-      final result = await _deepseekService.analyzeTranscription(text);
-      debugPrint('Deepseek analysis result: $result');
+      final result = await _aiAnalysisService.analyzeTranscription(text);
+      debugPrint('AI Analysis result: $result');
 
       // Extract notes and tasks from the LLM result
       List<String> notes = [];
@@ -457,39 +517,48 @@ class _MainScreenState extends State<MainScreen>
       backgroundColor: Colors.white,
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(bottom: 40.0), // Move up by 40 pixels
-        child: Container(
-          width: 335, // Further reduced width to clip more from the sides
-          height: 70, // Further reduced height to clip more from top/bottom
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(35.0),
-          ),
-          child: ClipRect(
-            child: OverflowBox(
-              minWidth: 600, // Keep original Rive animation width
-              maxWidth: 600,
-              minHeight: 250, // Keep original Rive animation height
-              maxHeight: 250,
-              child: Container(
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: Colors
-                        .red, // Red border to visualize the full animation area
-                    width: 3.0,
-                  ),
-                  borderRadius:
-                      BorderRadius.circular(16.0), // Match ClipRRect radius
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16.0),
-                  child: RiveAnimationWidget(
-                    timelineEntriesByDate: _timelineEntriesByDate,
-                    selectedDate: _selectedDate,
-                    onStateUpdate: () => setState(() {}),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Guest recording counter above the Rive animation
+            if (widget.isGuestMode) ...[
+              GuestRecordingCounter(
+                recordingsUsed: _guestRecordingCount,
+                maxRecordings: _guestModeService.maxRecordings,
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // Bottom bar Rive animation
+            Container(
+              width: 335, // Further reduced width to clip more from the sides
+              height: 70, // Further reduced height to clip more from top/bottom
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(35.0),
+              ),
+              child: ClipRect(
+                child: OverflowBox(
+                  minWidth: 600, // Keep original Rive animation width
+                  maxWidth: 600,
+                  minHeight: 250, // Keep original Rive animation height
+                  maxHeight: 250,
+                  child: Container(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16.0),
+                      child: RiveAnimationWidget(
+                        timelineEntriesByDate: _timelineEntriesByDate,
+                        selectedDate: _selectedDate,
+                        onStateUpdate: () => setState(() {}),
+                        isGuestMode: widget.isGuestMode,
+                        guestModeService: _guestModeService,
+                        onGuestRecordingCountUpdate: _loadGuestRecordingCount,
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
+          ],
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
@@ -514,24 +583,177 @@ class _MainScreenState extends State<MainScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Static "today" text with horizontal padding
+                          // Day indicator with upgrade button for guest mode
                           Padding(
                             padding: const EdgeInsets.only(
                                 top: 16.0,
                                 left: 24.0,
                                 right: 24.0,
                                 bottom: 16.0),
-                            child: Text(
-                              DateFormatter.formatDate(_selectedDate)
-                                  .toLowerCase(),
-                              style: const TextStyle(
-                                fontSize: 36,
-                                fontWeight: FontWeight.bold,
-                                fontFamily: 'Geist',
-                                color: Color(0xFF171717),
-                                height: 1.0,
-                                letterSpacing: -0.72,
-                              ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                // Day text
+                                Text(
+                                  DateFormatter.formatDate(_selectedDate)
+                                      .toLowerCase(),
+                                  style: const TextStyle(
+                                    fontSize: 36,
+                                    fontWeight: FontWeight.bold,
+                                    fontFamily: 'Geist',
+                                    color: Color(0xFF171717),
+                                    height: 1.0,
+                                    letterSpacing: -0.72,
+                                  ),
+                                ),
+
+                                // Buttons row - upgrade (guest mode) and signout
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    // Upgrade button for guest mode only
+                                    if (widget.isGuestMode) ...[
+                                      GestureDetector(
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) =>
+                                                  const SubscriptionScreen(),
+                                            ),
+                                          );
+                                        },
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            border: Border.all(
+                                              width: 1,
+                                              color: const Color(0xFF4772FF),
+                                            ),
+                                            borderRadius:
+                                                BorderRadius.circular(16),
+                                          ),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8, vertical: 5),
+                                            decoration: ShapeDecoration(
+                                              gradient: LinearGradient(
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                                colors: [
+                                                  const Color(0xFF5387FF),
+                                                  const Color(0xFF244CFF),
+                                                ],
+                                              ),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(16),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.start,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.center,
+                                              children: [
+                                                SvgPicture.asset(
+                                                  'assets/icons/upgrade.svg',
+                                                  width: 14,
+                                                  height: 14,
+                                                  colorFilter:
+                                                      const ColorFilter.mode(
+                                                    Colors.white,
+                                                    BlendMode.srcIn,
+                                                  ),
+                                                ),
+                                                SizedBox(width: 6),
+                                                Text(
+                                                  'Upgrade',
+                                                  textAlign: TextAlign.center,
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 14,
+                                                    fontFamily: 'Geist',
+                                                    fontWeight: FontWeight.w600,
+                                                    height: 1.50,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                    ],
+
+                                    // Signout button
+                                    GestureDetector(
+                                      onTap: () {
+                                        // Show confirmation dialog
+                                        showDialog(
+                                          context: context,
+                                          builder: (BuildContext context) {
+                                            return AlertDialog(
+                                              title: const Text('Sign Out'),
+                                              content: const Text(
+                                                  'Are you sure you want to sign out?'),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () {
+                                                    Navigator.of(context).pop();
+                                                  },
+                                                  child: const Text('Cancel'),
+                                                ),
+                                                TextButton(
+                                                  onPressed: () {
+                                                    Navigator.of(context).pop();
+                                                    _signOut();
+                                                  },
+                                                  child: const Text('Sign Out'),
+                                                ),
+                                              ],
+                                            );
+                                          },
+                                        );
+                                      },
+                                      child: Container(
+                                        width: 31,
+                                        height: 31,
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 1, vertical: 2),
+                                        clipBehavior: Clip.antiAlias,
+                                        decoration: ShapeDecoration(
+                                          color: const Color(0xFFE6EFFF),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(16),
+                                          ),
+                                        ),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.center,
+                                          children: [
+                                            SvgPicture.asset(
+                                              'assets/icons/signout.svg',
+                                              width: 11,
+                                              height: 11,
+                                              colorFilter:
+                                                  const ColorFilter.mode(
+                                                Color(0xFF001778),
+                                                BlendMode.srcIn,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
 

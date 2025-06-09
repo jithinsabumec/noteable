@@ -88,13 +88,13 @@ class ItemOptionsDialog extends StatelessWidget {
                       elevation: 0,
                       shadowColor: Colors.transparent,
                     ).copyWith(
-                      overlayColor: MaterialStateProperty.resolveWith<Color?>(
-                        (Set<MaterialState> states) {
-                          if (states.contains(MaterialState.pressed)) {
+                      overlayColor: WidgetStateProperty.resolveWith<Color?>(
+                        (Set<WidgetState> states) {
+                          if (states.contains(WidgetState.pressed)) {
                             return const Color(0xFF0038DD)
                                 .withValues(alpha: 0.1);
                           }
-                          if (states.contains(MaterialState.hovered)) {
+                          if (states.contains(WidgetState.hovered)) {
                             return const Color(0xFF0038DD)
                                 .withValues(alpha: 0.05);
                           }
@@ -154,13 +154,13 @@ class ItemOptionsDialog extends StatelessWidget {
                       elevation: 0,
                       shadowColor: Colors.transparent,
                     ).copyWith(
-                      overlayColor: MaterialStateProperty.resolveWith<Color?>(
-                        (Set<MaterialState> states) {
-                          if (states.contains(MaterialState.pressed)) {
+                      overlayColor: WidgetStateProperty.resolveWith<Color?>(
+                        (Set<WidgetState> states) {
+                          if (states.contains(WidgetState.pressed)) {
                             return const Color(0xFFC70000)
                                 .withValues(alpha: 0.1);
                           }
-                          if (states.contains(MaterialState.hovered)) {
+                          if (states.contains(WidgetState.hovered)) {
                             return const Color(0xFFC70000)
                                 .withValues(alpha: 0.05);
                           }

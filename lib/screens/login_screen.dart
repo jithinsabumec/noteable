@@ -66,8 +66,29 @@ class _LoginScreenState extends State<LoginScreen>
     try {
       await _authService.signInWithGoogle();
     } catch (e) {
+      String errorMessage = e.toString().replaceAll('Exception: ', '');
+
+      // Check for specific error types and provide user-friendly messages
+      if (errorMessage.contains('time synchronization') ||
+          errorMessage.contains('600 seconds') ||
+          errorMessage.contains('time is more than')) {
+        _showTimeSyncDialog();
+        return;
+      } else if (errorMessage.contains('network')) {
+        errorMessage = 'Please check your internet connection and try again.';
+      } else if (errorMessage.contains('cancelled') ||
+          errorMessage.contains('canceled')) {
+        errorMessage = 'Sign-in was cancelled. Please try again.';
+      } else if (errorMessage.contains('invalid-credential')) {
+        errorMessage =
+            'There was an issue with your Google account. Please try again.';
+      } else if (errorMessage.contains('operation-not-allowed')) {
+        errorMessage =
+            'Google Sign-In is currently not available. Please try again later.';
+      }
+
       setState(() {
-        _errorMessage = e.toString().replaceAll('Exception: ', '');
+        _errorMessage = errorMessage;
       });
     } finally {
       if (mounted) {
@@ -76,6 +97,77 @@ class _LoginScreenState extends State<LoginScreen>
         });
       }
     }
+  }
+
+  void _showTimeSyncDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.access_time, color: Colors.orange.shade600),
+              const SizedBox(width: 8),
+              const Text(
+                'Time Sync Issue',
+                style: TextStyle(
+                  fontFamily: 'Geist',
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Google Sign-In failed due to a time synchronization issue. This can happen when your device time is incorrect.',
+                style: TextStyle(
+                  fontFamily: 'Geist',
+                  fontSize: 16,
+                ),
+              ),
+              SizedBox(height: 16),
+              Text(
+                'To fix this:',
+                style: TextStyle(
+                  fontFamily: 'Geist',
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                ),
+              ),
+              SizedBox(height: 8),
+              Text(
+                '• Check your device date and time settings\n'
+                '• Enable automatic date & time\n'
+                '• Ensure you have a stable internet connection\n'
+                '• Try signing in again',
+                style: TextStyle(
+                  fontFamily: 'Geist',
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text(
+                'OK',
+                style: TextStyle(
+                  fontFamily: 'Geist',
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override

@@ -117,12 +117,8 @@ class _RiveCheckboxState extends State<RiveCheckbox> {
           debugPrint('isTicked input not found, trying alternative names');
           // Try alternative input names
           _isTickedInput = _controller!.findInput<bool>('isChecked');
-          if (_isTickedInput == null) {
-            _isTickedInput = _controller!.findInput<bool>('checked');
-          }
-          if (_isTickedInput == null) {
-            _isTickedInput = _controller!.findInput<bool>('ticked');
-          }
+          _isTickedInput ??= _controller!.findInput<bool>('checked');
+          _isTickedInput ??= _controller!.findInput<bool>('ticked');
           if (_isTickedInput != null) {
             debugPrint('Found alternative input: ${_isTickedInput!.name}');
             _updateRiveState();

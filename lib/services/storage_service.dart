@@ -23,16 +23,21 @@ class StorageService {
       await Hive.initFlutter();
 
       // Register adapters only if they haven't been registered already
-      if (!Hive.isAdapterRegistered(0))
+      if (!Hive.isAdapterRegistered(0)) {
         Hive.registerAdapter(TimelineEntryAdapter());
-      if (!Hive.isAdapterRegistered(1))
+      }
+      if (!Hive.isAdapterRegistered(1)) {
         Hive.registerAdapter(EntryTypeAdapter());
-      if (!Hive.isAdapterRegistered(2))
+      }
+      if (!Hive.isAdapterRegistered(2)) {
         Hive.registerAdapter(TaskItemModelAdapter());
-      if (!Hive.isAdapterRegistered(3))
+      }
+      if (!Hive.isAdapterRegistered(3)) {
         Hive.registerAdapter(ItemTypeModelAdapter());
-      if (!Hive.isAdapterRegistered(4))
+      }
+      if (!Hive.isAdapterRegistered(4)) {
         Hive.registerAdapter(TimelineItemRefModelAdapter());
+      }
 
       // Open box
       _entriesBox = await Hive.openBox<TimelineEntry>(entriesBoxName);

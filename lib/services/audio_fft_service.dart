@@ -39,7 +39,7 @@ class AudioFFTService {
       _debugLog('✅ AudioFFTService initialized successfully');
     } catch (e) {
       _debugLog('❌ Error initializing AudioFFTService: $e');
-      throw e;
+      rethrow;
     }
   }
 

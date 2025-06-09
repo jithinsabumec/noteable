@@ -10,10 +10,16 @@ class AuthService {
   // Firebase Auth instance
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Google Sign In instance
+  // Google Sign In instance with updated configuration
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     clientId:
         '103978403761-ejgfbeda55lnj04m5j3dkbbh23n9pdnq.apps.googleusercontent.com',
+    scopes: [
+      'email',
+      'profile',
+    ],
+    // Add this to help with authentication issues
+    signInOption: SignInOption.standard,
   );
 
   // Get current user
@@ -48,9 +54,12 @@ class AuthService {
     }
   }
 
-  // Sign in with Google
+  // Sign in with Google - Updated with better error handling
   Future<UserCredential?> signInWithGoogle() async {
     try {
+      // Sign out from any previous session to ensure clean state
+      await _googleSignIn.signOut();
+
       // Begin interactive sign in process
       final GoogleSignInAccount? gUser = await _googleSignIn.signIn();
 
@@ -62,6 +71,11 @@ class AuthService {
       // Obtain auth details from request
       final GoogleSignInAuthentication gAuth = await gUser.authentication;
 
+      // Verify we have the required tokens
+      if (gAuth.accessToken == null || gAuth.idToken == null) {
+        throw Exception('Failed to obtain Google authentication tokens');
+      }
+
       // Create new credential
       final credential = GoogleAuthProvider.credential(
         accessToken: gAuth.accessToken,
@@ -70,7 +84,29 @@ class AuthService {
 
       // Sign in with credential
       return await _auth.signInWithCredential(credential);
+    } on FirebaseAuthException catch (e) {
+      // Handle specific Firebase Auth errors
+      switch (e.code) {
+        case 'account-exists-with-different-credential':
+          throw Exception(
+              'An account already exists with a different sign-in method.');
+        case 'invalid-credential':
+          throw Exception('The credential is invalid or has expired.');
+        case 'operation-not-allowed':
+          throw Exception('Google sign-in is not enabled.');
+        case 'user-disabled':
+          throw Exception('This user account has been disabled.');
+        default:
+          throw Exception('Google sign-in failed: ${e.message}');
+      }
     } catch (e) {
+      // For the specific time synchronization error
+      if (e.toString().contains('600 seconds') ||
+          e.toString().contains('time is more than') ||
+          e.toString().contains('org.openid.appauth.general')) {
+        throw Exception(
+            'Authentication failed due to time synchronization. Please check your device time and try again.');
+      }
       rethrow;
     }
   }

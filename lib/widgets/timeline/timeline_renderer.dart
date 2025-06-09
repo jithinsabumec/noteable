@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../models/timeline_models.dart';
-import '../rive_checkbox.dart';
 import 'timeline_box_new.dart';
 import 'timeline_empty_state.dart';
 
