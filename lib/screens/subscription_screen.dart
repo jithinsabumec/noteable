@@ -31,28 +31,24 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               // Close button overlay with SafeArea padding
               SafeArea(
                 child: Positioned(
-                  top: 12.0,
-                  left: 24.0,
-                  child: GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(
-                        Icons.close,
-                        size: 18,
-                        color: Colors.black,
+                  top: 16.0,
+                  left: 0.0,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 24.0),
+                    child: GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: const Icon(
+                          Icons.close,
+                          size: 24,
+                          color: Colors.black,
+                        ),
                       ),
                     ),
                   ),
