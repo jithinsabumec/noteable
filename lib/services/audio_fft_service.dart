@@ -299,15 +299,27 @@ class AudioFFTService {
     _isRecordInput!.value = testValue;
   }
 
-  Future<void> dispose() async {
-    _debugLog('🗑️ Disposing AudioFFTService...');
-    await _stopRecordingInternal();
+  void dispose() {
+    print('🎤 Disposing AudioFFTService...');
+
+    // Cancel all timers
+    _updateTimer?.cancel();
+    _updateTimer = null;
+
+    _levelCheckTimer?.cancel();
+    _levelCheckTimer = null;
+
     _riveCheckTimer?.cancel();
     _riveCheckTimer = null;
+
+    // Reset state
+    _isRecording = false;
+
+    // Clear controller reference
     _riveController = null;
     _isRecordInput = null;
-    _isInitialized = false;
-    _debugLog('✅ AudioFFTService disposed');
+
+    print('🎤 AudioFFTService disposed');
   }
 
   // Getters
@@ -316,4 +328,50 @@ class AudioFFTService {
   bool get debugMode => _debugMode;
   List<double> get frequencyBands => List.from(_frequencyBands);
   double get currentAudioLevel => _currentAudioLevel;
+
+  // Reset the service state without fully disposing it
+  Future<void> reset() async {
+    print('🎤 Resetting AudioFFTService...');
+
+    // Stop recording if active
+    if (_isRecording) {
+      await _stopRecordingInternal();
+    }
+
+    // Cancel all timers to be safe
+    _updateTimer?.cancel();
+    _updateTimer = null;
+
+    _levelCheckTimer?.cancel();
+    _levelCheckTimer = null;
+
+    _riveCheckTimer?.cancel();
+    _riveCheckTimer = null;
+
+    // Reset state variables
+    _isRecording = false;
+    _currentAudioLevel = 0.0;
+
+    // Reset frequency bands
+    for (int i = 0; i < _frequencyBands.length; i++) {
+      _frequencyBands[i] = 1.0;
+    }
+
+    // Reset Rive inputs if available
+    if (_riveController != null) {
+      if (_isRecordInput != null) {
+        _isRecordInput!.value = false;
+      }
+
+      // Reset all bar values
+      for (int i = 1; i <= 7; i++) {
+        final barInput = _riveController!.findInput<double>('Bar $i');
+        if (barInput != null) {
+          barInput.value = 1.0;
+        }
+      }
+    }
+
+    print('🎤 AudioFFTService reset complete');
+  }
 }

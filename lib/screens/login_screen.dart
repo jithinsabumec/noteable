@@ -32,21 +32,17 @@ class _LoginScreenState extends State<LoginScreen>
       vsync: this,
     );
 
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeInOut,
-    ));
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
 
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.15),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeOutCubic,
-    ));
+    _slideAnimation =
+        Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
 
     _animationController.forward();
   }
@@ -126,10 +122,7 @@ class _LoginScreenState extends State<LoginScreen>
             children: [
               Text(
                 'Google Sign-In failed due to a time synchronization issue. This can happen when your device time is incorrect.',
-                style: TextStyle(
-                  fontFamily: 'Geist',
-                  fontSize: 16,
-                ),
+                style: TextStyle(fontFamily: 'Geist', fontSize: 16),
               ),
               SizedBox(height: 16),
               Text(
@@ -146,10 +139,7 @@ class _LoginScreenState extends State<LoginScreen>
                 '• Enable automatic date & time\n'
                 '• Ensure you have a stable internet connection\n'
                 '• Try signing in again',
-                style: TextStyle(
-                  fontFamily: 'Geist',
-                  fontSize: 14,
-                ),
+                style: TextStyle(fontFamily: 'Geist', fontSize: 14),
               ),
             ],
           ),
@@ -204,177 +194,182 @@ class _LoginScreenState extends State<LoginScreen>
 
                 // Main content with SafeArea
                 SafeArea(
-                  child: Positioned.fill(
-                    child: Column(
-                      children: [
-                        // Top spacing to account for illustration
-                        SizedBox(
-                            height: MediaQuery.of(context).size.height * 0.37),
+                  child: Column(
+                    children: [
+                      // Top spacing to account for illustration
+                      SizedBox(
+                        height: MediaQuery.of(context).size.height * 0.37,
+                      ),
 
-                        // Welcome text section
-                        Expanded(
-                          child: Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 32.0),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                // Welcome text
-                                const Text(
-                                  'Welcome to',
-                                  style: TextStyle(
-                                    fontSize: 36,
-                                    fontWeight: FontWeight.w400,
-                                    fontFamily: 'Geist',
-                                    color: Colors.white70,
-                                    height: 1.2,
+                      // Welcome text section
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32.0,
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              // Welcome text
+                              const Text(
+                                'Welcome to',
+                                style: TextStyle(
+                                  fontSize: 36,
+                                  fontWeight: FontWeight.w400,
+                                  fontFamily: 'Geist',
+                                  color: Colors.white70,
+                                  height: 1.2,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+
+                              const SizedBox(height: 2),
+
+                              const Text(
+                                'Noteable',
+                                style: TextStyle(
+                                  fontSize: 52,
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'Geist',
+                                  color: Colors.white,
+                                  height: 1.1,
+                                  letterSpacing: -1.0,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+
+                              const SizedBox(height: 80),
+
+                              // Google Sign-In Button
+                              _buildGoogleButton(),
+
+                              const SizedBox(height: 24),
+
+                              // Divider with "or" text
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Container(
+                                      height: 1,
+                                      color: Colors.white.withOpacity(0.3),
+                                    ),
                                   ),
-                                  textAlign: TextAlign.center,
-                                ),
-
-                                const SizedBox(height: 2),
-
-                                const Text(
-                                  'Noteable',
-                                  style: TextStyle(
-                                    fontSize: 52,
-                                    fontWeight: FontWeight.bold,
-                                    fontFamily: 'Geist',
-                                    color: Colors.white,
-                                    height: 1.1,
-                                    letterSpacing: -1.0,
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                    child: Text(
+                                      'or',
+                                      style: TextStyle(
+                                        color: Colors.white.withOpacity(0.7),
+                                        fontFamily: 'Geist',
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
                                   ),
-                                  textAlign: TextAlign.center,
+                                  Expanded(
+                                    child: Container(
+                                      height: 1,
+                                      color: Colors.white.withOpacity(0.3),
+                                    ),
+                                  ),
+                                ],
+                              ),
+
+                              const SizedBox(height: 24),
+
+                              // Guest mode text and button
+                              Text(
+                                'Use guest mode to try the app',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontFamily: 'Geist',
+                                  color: Colors.white.withOpacity(0.65),
+                                  fontWeight: FontWeight.w400,
                                 ),
+                                textAlign: TextAlign.center,
+                              ),
 
-                                const SizedBox(height: 80),
+                              const SizedBox(height: 2),
 
-                                // Google Sign-In Button
-                                _buildGoogleButton(),
-
-                                const SizedBox(height: 24),
-
-                                // Divider with "or" text
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Container(
-                                        height: 1,
-                                        color: Colors.white.withOpacity(0.3),
-                                      ),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 16),
-                                      child: Text(
-                                        'or',
-                                        style: TextStyle(
-                                          color: Colors.white.withOpacity(0.7),
-                                          fontFamily: 'Geist',
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: Container(
-                                        height: 1,
-                                        color: Colors.white.withOpacity(0.3),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 24),
-
-                                // Guest mode text and button
-                                Text(
-                                  'Use guest mode to try the app',
+                              RichText(
+                                textAlign: TextAlign.center,
+                                text: TextSpan(
                                   style: TextStyle(
                                     fontSize: 14,
                                     fontFamily: 'Geist',
                                     color: Colors.white.withOpacity(0.65),
                                     fontWeight: FontWeight.w400,
                                   ),
-                                  textAlign: TextAlign.center,
-                                ),
-
-                                const SizedBox(height: 2),
-
-                                RichText(
-                                  textAlign: TextAlign.center,
-                                  text: TextSpan(
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontFamily: 'Geist',
-                                      color: Colors.white.withOpacity(0.65),
-                                      fontWeight: FontWeight.w400,
+                                  children: [
+                                    const TextSpan(text: 'Includes '),
+                                    TextSpan(
+                                      text:
+                                          '3 free voice-to-insight generations',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        decoration: TextDecoration.underline,
+                                        decorationColor:
+                                            Colors.white.withOpacity(0.85),
+                                        color: Colors.white.withOpacity(0.85),
+                                        height: 1.4,
+                                      ),
                                     ),
+                                  ],
+                                ),
+                              ),
+
+                              const SizedBox(height: 24),
+
+                              // Guest mode button
+                              if (widget.onGuestMode != null)
+                                _buildGuestButton(),
+
+                              // Error message
+                              if (_errorMessage.isNotEmpty) ...[
+                                const SizedBox(height: 24),
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.shade50,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Colors.red.shade200,
+                                    ),
+                                  ),
+                                  child: Row(
                                     children: [
-                                      const TextSpan(text: 'Includes '),
-                                      TextSpan(
-                                        text:
-                                            '3 free voice-to-insight generations',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          decoration: TextDecoration.underline,
-                                          decorationColor:
-                                              Colors.white.withOpacity(0.85),
-                                          color: Colors.white.withOpacity(0.85),
-                                          height: 1.4,
+                                      Icon(
+                                        Icons.error_outline,
+                                        color: Colors.red.shade600,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          _errorMessage,
+                                          style: TextStyle(
+                                            color: Colors.red.shade700,
+                                            fontSize: 14,
+                                            fontFamily: 'Geist',
+                                          ),
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
-
-                                const SizedBox(height: 24),
-
-                                // Guest mode button
-                                if (widget.onGuestMode != null)
-                                  _buildGuestButton(),
-
-                                // Error message
-                                if (_errorMessage.isNotEmpty) ...[
-                                  const SizedBox(height: 24),
-                                  Container(
-                                    padding: const EdgeInsets.all(16),
-                                    margin: const EdgeInsets.symmetric(
-                                        horizontal: 16),
-                                    decoration: BoxDecoration(
-                                      color: Colors.red.shade50,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                          color: Colors.red.shade200),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.error_outline,
-                                            color: Colors.red.shade600,
-                                            size: 20),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Text(
-                                            _errorMessage,
-                                            style: TextStyle(
-                                              color: Colors.red.shade700,
-                                              fontSize: 14,
-                                              fontFamily: 'Geist',
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-
-                                const SizedBox(height: 40),
                               ],
-                            ),
+
+                              const SizedBox(height: 40),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -416,8 +411,9 @@ class _LoginScreenState extends State<LoginScreen>
                     height: 20,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(Color(0xFF4F46E5)),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Color(0xFF4F46E5),
+                      ),
                     ),
                   )
                 else
@@ -450,10 +446,7 @@ class _LoginScreenState extends State<LoginScreen>
       height: 56,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.3),
-          width: 1.5,
-        ),
+        border: Border.all(color: Colors.white.withOpacity(0.3), width: 1.5),
       ),
       child: Material(
         color: Colors.transparent,

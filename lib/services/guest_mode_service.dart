@@ -2,7 +2,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class GuestModeService {
   static const String _guestRecordingCountKey = 'guest_recording_count';
-  static const int _maxGuestRecordings = 3;
+  // Set to a very high number for unlimited testing
+  static const int _maxGuestRecordings = 5;
 
   // Singleton pattern
   static final GuestModeService _instance = GuestModeService._internal();
@@ -25,10 +26,7 @@ class GuestModeService {
       final prefs = await SharedPreferences.getInstance();
       final currentCount = await getRecordingCount();
 
-      if (currentCount >= _maxGuestRecordings) {
-        return false; // Already at max, don't increment
-      }
-
+      // Always allow incrementing for testing
       await prefs.setInt(_guestRecordingCountKey, currentCount + 1);
       return true;
     } catch (e) {
@@ -38,8 +36,8 @@ class GuestModeService {
 
   /// Check if the user can still record in guest mode
   Future<bool> canRecord() async {
-    final currentCount = await getRecordingCount();
-    return currentCount < _maxGuestRecordings;
+    // Always return true for testing
+    return true;
   }
 
   /// Get how many recordings are left for guest mode

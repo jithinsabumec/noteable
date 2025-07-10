@@ -73,7 +73,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                       offset: const Offset(0, -80), // Move up to overlap image
                       child: Column(
                         children: [
-                          Text(
+                          const Text(
                             'Try Noteable Pro',
                             textAlign: TextAlign.center,
                             style: TextStyle(
@@ -89,7 +89,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                             crossAxisAlignment: CrossAxisAlignment.baseline,
                             textBaseline: TextBaseline.alphabetic,
                             children: [
-                              Text(
+                              const Text(
                                 'for ',
                                 style: TextStyle(
                                   fontSize: 28,
@@ -106,18 +106,18 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                                     style: GoogleFonts.fuzzyBubbles(
                                       fontSize: 28,
                                       fontWeight: FontWeight.bold,
-                                      color: Color(0xFF1E44FF),
+                                      color: const Color(0xFF1E44FF),
                                       height: 1.2,
                                     ),
                                   ),
                                   Transform.translate(
-                                    offset: Offset(0, -3),
+                                    offset: const Offset(0, -3),
                                     child: Container(
                                       width:
                                           52, // Adjust width to match text width
                                       height: 3,
                                       decoration: BoxDecoration(
-                                        color: Color(0xFF1E44FF),
+                                        color: const Color(0xFF1E44FF),
                                         borderRadius:
                                             BorderRadius.circular(1.5),
                                       ),
@@ -184,7 +184,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                                   color: const Color(0xFFF3F4F7),
                                   borderRadius: BorderRadius.circular(13.5),
                                 ),
-                                child: Column(
+                                child: const Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
@@ -202,7 +202,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                                         fontSize: 18,
                                         fontWeight: FontWeight.w500,
                                         fontFamily: 'Geist',
-                                        color: const Color(0xFF464347),
+                                        color: Color(0xFF464347),
                                       ),
                                     ),
                                   ],
@@ -237,7 +237,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                                 ),
                                 child: Stack(
                                   children: [
-                                    Column(
+                                    const Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
@@ -256,7 +256,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                                             fontSize: 18,
                                             fontWeight: FontWeight.w500,
                                             fontFamily: 'Geist',
-                                            color: const Color(0xFF464347),
+                                            color: Color(0xFF464347),
                                           ),
                                         ),
                                       ],
@@ -418,7 +418,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               const SizedBox(height: 4),
               Text(
                 description,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 18,
                   fontFamily: 'Geist',
                   color: Color(0xFF7F7C7F),

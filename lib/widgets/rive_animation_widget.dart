@@ -42,7 +42,10 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
   RiveAnimation? anim;
 
   // Audio services
-  final _audioRecorder = AudioRecorder();
+  // AudioRecorder is recreated for every recording cycle to prevent the
+  // underlying recorder from getting stuck after the first use on some
+  // devices.
+  AudioRecorder _audioRecorder = AudioRecorder();
   final _assemblyAIService = AssemblyAIService();
   final _aiAnalysisService = AIAnalysisService();
   final _storageService = StorageService();
@@ -193,8 +196,25 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       return;
     }
 
+    // Reset processing states immediately when starting a new recording
+    // This ensures we don't block subsequent recordings
     if (_isTranscribing || _isAnalyzing) {
-      return;
+      debugPrint('🔄 Resetting processing states for new recording');
+      setState(() {
+        _isTranscribing = false;
+        _isAnalyzing = false;
+        _hasProcessingError = false;
+        _lastError = null;
+        _transcribedText = '';
+      });
+
+      // Reset Rive inputs
+      if (_isDoneInput != null) {
+        _isDoneInput!.value = false;
+      }
+      if (_isSubmitInput != null) {
+        _isSubmitInput!.value = false;
+      }
     }
 
     // Check guest mode recording limits
@@ -202,6 +222,7 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       final canRecord = await widget.guestModeService!.canRecord();
       if (!canRecord) {
         // Show a message that guest mode limit has been reached
+        debugPrint('❌ Guest mode recording limit reached');
         return;
       }
     }
@@ -210,13 +231,22 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       // Check permissions
       final hasPermission = await _checkPermissions();
       if (!hasPermission) {
+        debugPrint('❌ Recording permission not granted');
         return;
       }
+
+      // Dispose any previous recorder instance and create a fresh one
+      try {
+        await _audioRecorder.dispose();
+      } catch (_) {}
+      _audioRecorder = AudioRecorder();
 
       // Get temporary directory for saving the recording
       final directory = await getTemporaryDirectory();
       _recordedFilePath =
           '${directory.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+      debugPrint('🎙️ Starting recording to: $_recordedFilePath');
 
       // Start recording
       await _audioRecorder.start(
@@ -235,13 +265,18 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
         _isTranscribing = false;
         _isAnalyzing = false;
         _transcribedText = '';
+        _hasProcessingError = false;
+        _lastError = null;
       });
 
       // Reset isDone to false when starting new recording
       if (_isDoneInput != null) {
         _isDoneInput!.value = false;
       }
+
+      debugPrint('✅ Recording started successfully');
     } catch (e) {
+      debugPrint('❌ Failed to start recording: $e');
       // Reset state on error
       setState(() {
         _isRecording = false;
@@ -251,11 +286,14 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
 
   Future<void> _stopRecording() async {
     if (!_isRecording) {
+      debugPrint('⚠️ Stop recording called but not currently recording');
       return;
     }
 
     try {
+      debugPrint('🛑 Stopping recording...');
       final path = await _audioRecorder.stop();
+      debugPrint('✅ Recording stopped, path: $path');
 
       setState(() {
         _isRecording = false;
@@ -264,15 +302,40 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       if (path != null) {
         // Comprehensive file validation
         await _validateAudioFile(path);
+        debugPrint('✅ Audio file validation passed');
 
         // Start the transcription and processing workflow
         await _processRecording(path);
+      } else {
+        debugPrint('❌ Recording path is null');
+        throw Exception('Recording failed - no file path returned');
       }
+
+      // Dispose the recorder so we can recreate a fresh instance next time
+      try {
+        await _audioRecorder.dispose();
+      } catch (_) {}
     } catch (e) {
+      debugPrint('❌ Error stopping recording: $e');
       // Reset state on error
       setState(() {
         _isRecording = false;
+        _isTranscribing = false;
+        _isAnalyzing = false;
+        _hasProcessingError = true;
+        _lastError = e.toString();
       });
+
+      // Show error to user
+      _showErrorSnackBar('Recording failed: ${e.toString()}');
+
+      // Set isDone to true to stop loading animation
+      if (_isDoneInput != null) {
+        _isDoneInput!.value = true;
+      }
+
+      // Schedule reset after error
+      _scheduleStateReset();
     }
   }
 
@@ -303,8 +366,6 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       setState(() {
         _isTranscribing = true;
         _isAnalyzing = false;
-        _hasProcessingError = false;
-        _lastError = null;
       });
 
       try {
@@ -392,57 +453,64 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       }
 
       // Step 3: Add to timeline using ItemManagementService
-      await _addToTimeline(result);
+      debugPrint('📅 Adding items to timeline...');
+      await _addItemsToTimeline(result);
 
-      if (!mounted) return;
+      debugPrint('✅ Processing completed successfully');
 
-      // Step 4: Complete the process
-      setState(() {
-        _isTranscribing = false;
-        _isAnalyzing = false;
-        _hasProcessingError = false;
-        _lastError = null;
-      });
-
-      // Set isDone to true to indicate completion
+      // Set isDone to true to show completion
       if (_isDoneInput != null) {
         _isDoneInput!.value = true;
+        debugPrint('✅ Set isDone to true');
       }
+
+      // --------------------------------------------------------------
+      // Fast-reset the inputs one second after the DONE animation is
+      // shown so the user can immediately start a new recording.  We
+      // still keep the existing _scheduleStateReset() (2 s) as a
+      // fallback, but this makes the UX responsive without requiring
+      // an app restart.
+      // --------------------------------------------------------------
+      Timer(const Duration(seconds: 1), () {
+        if (mounted) {
+          _immediateStateReset();
+        }
+      });
 
       // Show success message
       if (hasNotes || hasTasks) {
         _showSuccessSnackBar(
-            'Successfully added ${result['notes']?.length ?? 0} notes and ${result['tasks']?.length ?? 0} tasks!');
+            'Recording processed successfully! Added ${result['notes']?.length ?? 0} notes and ${result['tasks']?.length ?? 0} tasks.');
       }
 
-      // Schedule a reset after the completion animation finishes
+      // Schedule reset for next recording
       _scheduleStateReset();
     } catch (e) {
       debugPrint('❌ AI analysis failed: $e');
-      if (mounted) {
-        setState(() {
-          _isTranscribing = false;
-          _isAnalyzing = false;
-          _hasProcessingError = true;
-          _lastError = e.toString();
-        });
+      if (!mounted) return;
 
-        // Show error to user
-        _showErrorSnackBar('AI analysis failed: ${e.toString()}');
+      setState(() {
+        _isTranscribing = false;
+        _isAnalyzing = false;
+        _hasProcessingError = true;
+        _lastError = e.toString();
+      });
 
-        // Set isDone to true even on error
-        if (_isDoneInput != null) {
-          _isDoneInput!.value = true;
-        }
+      // Show error to user
+      _showErrorSnackBar('AI analysis failed: ${e.toString()}');
 
-        // Schedule reset even after error
-        _scheduleStateReset();
+      // Set isDone to true even on error to stop loading animation
+      if (_isDoneInput != null) {
+        _isDoneInput!.value = true;
+        debugPrint('✅ Set isDone to true after error');
       }
-      throw Exception('AI analysis failed: $e');
+
+      // Schedule reset even after error
+      _scheduleStateReset();
     }
   }
 
-  Future<void> _addToTimeline(Map<String, dynamic> result) async {
+  Future<void> _addItemsToTimeline(Map<String, dynamic> result) async {
     try {
       debugPrint('📅 Adding items to timeline...');
 
@@ -503,11 +571,57 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
     }
   }
 
+  // Immediately reset all states for the next recording cycle
+  void _immediateStateReset() {
+    if (!mounted) {
+      debugPrint('⚠️ Widget not mounted, skipping immediate state reset');
+      return;
+    }
+
+    debugPrint('🔄 Immediate state reset for next recording');
+    // Reset all processing states
+    setState(() {
+      _isRecording = false;
+      _isTranscribing = false;
+      _isAnalyzing = false;
+      _transcribedText = '';
+      _recordingStartTime = null;
+      _hasProcessingError = false;
+      _lastError = null;
+    });
+
+    // Reset all Rive inputs
+    if (_isRecordInput != null) {
+      _isRecordInput!.value = false;
+    }
+
+    if (_isSubmitInput != null) {
+      _isSubmitInput!.value = false;
+    }
+
+    if (_isDoneInput != null) {
+      _isDoneInput!.value = false;
+    }
+
+    // Ensure the Click input is reset so that the button can be pressed again
+    if (_clickInput != null) {
+      _clickInput!.value = false;
+      debugPrint('🔄 Reset click input');
+    }
+
+    debugPrint('✅ Immediate state reset complete - ready for next recording');
+  }
+
   // Reset all states for the next recording cycle
   void _scheduleStateReset() {
-    Timer(const Duration(seconds: 3), () {
-      if (!mounted) return;
+    debugPrint('⏰ Scheduling state reset in 2 seconds...');
+    Timer(const Duration(seconds: 2), () {
+      if (!mounted) {
+        debugPrint('⚠️ Widget not mounted, skipping state reset');
+        return;
+      }
 
+      debugPrint('🔄 Resetting all states for next recording');
       // Reset all processing states
       setState(() {
         _isRecording = false;
@@ -515,20 +629,33 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
         _isAnalyzing = false;
         _transcribedText = '';
         _recordingStartTime = null;
+        _hasProcessingError = false;
+        _lastError = null;
       });
 
       // Reset all Rive inputs
       if (_isRecordInput != null) {
         _isRecordInput!.value = false;
+        debugPrint('🔄 Reset isRecord input');
       }
 
       if (_isSubmitInput != null) {
         _isSubmitInput!.value = false;
+        debugPrint('🔄 Reset isSubmit input');
       }
 
       if (_isDoneInput != null) {
         _isDoneInput!.value = false;
+        debugPrint('🔄 Reset isDone input');
       }
+
+      // Ensure the Click input is reset so that the button can be pressed again
+      if (_clickInput != null) {
+        _clickInput!.value = false;
+        debugPrint('🔄 Reset click input');
+      }
+
+      debugPrint('✅ State reset complete - ready for next recording');
     });
   }
 

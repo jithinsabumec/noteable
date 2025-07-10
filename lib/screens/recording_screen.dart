@@ -17,7 +17,7 @@ class RecordingScreen extends StatefulWidget {
 
 class _RecordingScreenState extends State<RecordingScreen>
     with SingleTickerProviderStateMixin {
-  final _audioRecorder = AudioRecorder();
+  AudioRecorder _audioRecorder = AudioRecorder();
   final _audioFFTService = AudioFFTService();
   bool _isRecording = false;
   bool _isPaused = false;
@@ -44,6 +44,7 @@ class _RecordingScreenState extends State<RecordingScreen>
   @override
   void initState() {
     super.initState();
+    print('🔧 [DEBUG] RecordingScreen initState');
     _initializeServices();
     _loadRiveAnimation();
     _preloadTranscribeAnimation();
@@ -52,8 +53,18 @@ class _RecordingScreenState extends State<RecordingScreen>
   Future<void> _initializeServices() async {
     print('🔧 [DEBUG] Starting service initialization...');
     try {
+      // Reset the AudioFFTService to ensure a clean state
+      await _audioFFTService.reset();
+
+      // Initialize the AudioFFTService
       await _audioFFTService.initialize(debugMode: true);
       print('🔧 [DEBUG] AudioFFTService initialized successfully');
+
+      // Create a fresh recorder instance
+      _audioRecorder.dispose();
+      _audioRecorder = AudioRecorder();
+      await Future.delayed(const Duration(milliseconds: 300));
+      print('🔧 [DEBUG] Created fresh AudioRecorder instance');
     } catch (e) {
       print('🔧 [DEBUG] Error initializing audio FFT service: $e');
     }
@@ -81,7 +92,9 @@ class _RecordingScreenState extends State<RecordingScreen>
         _transcribeArtboard = artboard;
         _transcribeLoaded = true;
       });
-    } catch (e) {}
+    } catch (e) {
+      print('🔧 [DEBUG] Error preloading transcribe animation: $e');
+    }
   }
 
   void _loadRiveAnimation() async {
@@ -95,7 +108,9 @@ class _RecordingScreenState extends State<RecordingScreen>
       final file = rive.RiveFile.import(data);
 
       // Get available artboards for debugging
-      for (final artboard in file.artboards) {}
+      for (final artboard in file.artboards) {
+        print('🔧 [DEBUG] Available artboard: ${artboard.name}');
+      }
 
       // Setup the artboard - use the main artboard named "Artboard"
       final artboard = file.mainArtboard;
@@ -136,6 +151,19 @@ class _RecordingScreenState extends State<RecordingScreen>
         _isPauseInput = controller.findInput<bool>('isPause');
         var isRecordingInput = controller.findInput<bool>('IsRecording');
 
+        // Reset the click input to ensure it's ready for a new recording
+        if (_clickInput != null) {
+          _clickInput!.value = false;
+        }
+
+        if (_isPauseInput != null) {
+          _isPauseInput!.value = false;
+        }
+
+        if (isRecordingInput != null) {
+          isRecordingInput.value = false;
+        }
+
         _controller = controller;
 
         // Set the Rive controller in the FFT service
@@ -149,7 +177,9 @@ class _RecordingScreenState extends State<RecordingScreen>
         _riveArtboard = artboard;
         _riveLoaded = true;
       });
-    } catch (error) {}
+    } catch (error) {
+      print('🔧 [DEBUG] Error loading Rive animation: $error');
+    }
   }
 
   @override
@@ -164,6 +194,7 @@ class _RecordingScreenState extends State<RecordingScreen>
   // Start recording function
   Future<void> _startRecordingAudio() async {
     try {
+      print('🔧 [DEBUG] Starting recording audio...');
       // Permissions are already checked before calling this method in the GestureDetector's onTapDown
 
       // Get temporary directory for saving the recording
@@ -171,7 +202,31 @@ class _RecordingScreenState extends State<RecordingScreen>
       _recordedFilePath =
           '${directory.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
 
-      // Start recording
+      print('🔧 [DEBUG] Recording to path: $_recordedFilePath');
+
+      // Make sure the recorder is in a clean state by creating a new instance
+      try {
+        await _audioRecorder.dispose();
+        print('🔧 [DEBUG] Disposed old recorder');
+
+        // Small delay to ensure resources are released
+        await Future.delayed(const Duration(milliseconds: 200));
+
+        // Create a fresh recorder instance
+        _audioRecorder = AudioRecorder();
+        print('🔧 [DEBUG] Created new recorder instance');
+      } catch (e) {
+        print('🔧 [DEBUG] Error resetting recorder: $e');
+      }
+
+      // Check if recorder has permission before starting
+      final hasPermission = await _audioRecorder.hasPermission();
+      if (!hasPermission) {
+        print('🔧 [DEBUG] Recorder reports no permission');
+        throw Exception('Recording permission denied');
+      }
+
+      // Start recording with the fresh recorder
       await _audioRecorder.start(
         const RecordConfig(
           encoder: AudioEncoder.aacLc,
@@ -180,6 +235,8 @@ class _RecordingScreenState extends State<RecordingScreen>
         ),
         path: _recordedFilePath!,
       );
+
+      print('🔧 [DEBUG] Recording started successfully');
 
       setState(() {
         _isRecording = true;
@@ -191,6 +248,7 @@ class _RecordingScreenState extends State<RecordingScreen>
       // since it should already be triggered by the GestureDetector
 
       // Start timer for duration
+      _timer?.cancel(); // Cancel any existing timer
       _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (_isRecording && !_isPaused) {
           setState(() {
@@ -199,6 +257,7 @@ class _RecordingScreenState extends State<RecordingScreen>
         }
       });
     } catch (e) {
+      print('🔧 [DEBUG] Recording error: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Recording error: ${e.toString()}'),
@@ -218,9 +277,13 @@ class _RecordingScreenState extends State<RecordingScreen>
     if (!_isRecording) return;
 
     try {
+      print(
+          '🔧 [DEBUG] Pause/Resume recording: current state isPaused=$_isPaused');
+
       if (_isPaused) {
         // Currently paused, so we are resuming
         await _audioRecorder.resume();
+        print('🔧 [DEBUG] Recording resumed');
 
         // Update Rive animation state - resuming
         if (_isPauseInput != null) {
@@ -230,6 +293,7 @@ class _RecordingScreenState extends State<RecordingScreen>
       } else {
         // Currently recording, so we are pausing
         await _audioRecorder.pause();
+        print('🔧 [DEBUG] Recording paused');
 
         // Update Rive animation state - pausing
         if (_isPauseInput != null) {
@@ -243,6 +307,7 @@ class _RecordingScreenState extends State<RecordingScreen>
         _isPaused = !_isPaused; // Toggle the pause state for UI updates
       });
     } catch (e) {
+      print('🔧 [DEBUG] Error pausing/resuming recording: $e');
       // Avoid calling setState here if the context might be invalid due to an error.
       // Show SnackBar for user feedback.
       if (mounted) {
@@ -262,7 +327,9 @@ class _RecordingScreenState extends State<RecordingScreen>
     if (!_isRecording) return;
 
     try {
+      print('🔧 [DEBUG] Stopping recording...');
       final path = await _audioRecorder.stop();
+      print('🔧 [DEBUG] Recording stopped, path: $path');
 
       // Reset Rive animation state
       if (_clickInput != null) {
@@ -278,6 +345,7 @@ class _RecordingScreenState extends State<RecordingScreen>
       });
 
       _timer?.cancel();
+      _timer = null;
 
       if (submit && path != null) {
         // First show the transcribe animation directly in this screen
@@ -299,12 +367,25 @@ class _RecordingScreenState extends State<RecordingScreen>
         Navigator.pop(context);
       }
     } catch (e) {
+      print('🔧 [DEBUG] Error stopping recording: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error stopping recording: $e'),
           duration: const Duration(seconds: 2),
         ),
       );
+
+      // Reset state even if there's an error
+      setState(() {
+        _isRecording = false;
+        _isPaused = false;
+      });
+
+      _timer?.cancel();
+      _timer = null;
+
+      // Close the screen to avoid getting stuck
+      Navigator.pop(context);
     }
   }
 
@@ -317,11 +398,19 @@ class _RecordingScreenState extends State<RecordingScreen>
 
   // Check permissions (reusing the method from MainScreen)
   Future<bool> _checkPermissions() async {
+    print('🔧 [DEBUG] Checking microphone permissions...');
     final micStatus = await Permission.microphone.status;
+    print('🔧 [DEBUG] Current microphone permission status: $micStatus');
 
-    if (micStatus.isGranted) return true;
+    if (micStatus.isGranted) {
+      print('🔧 [DEBUG] Microphone permission already granted');
+      return true;
+    }
 
+    print('🔧 [DEBUG] Requesting microphone permission...');
     final newMicStatus = await Permission.microphone.request();
+    print('🔧 [DEBUG] New microphone permission status: $newMicStatus');
+
     return newMicStatus.isGranted;
   }
 
@@ -415,11 +504,16 @@ class _RecordingScreenState extends State<RecordingScreen>
                             height: scaledTouchAreaSize,
                             child: GestureDetector(
                               onTapDown: (_) async {
+                                print(
+                                    '🔧 [DEBUG] Tap detected on recording button');
                                 if (!_isRecording) {
+                                  print(
+                                      '🔧 [DEBUG] Not recording, will attempt to start');
                                   // Check permissions first before starting animation or recording
                                   final permissionsGranted =
                                       await _checkPermissions();
                                   if (!permissionsGranted) {
+                                    print('🔧 [DEBUG] Permissions not granted');
                                     if (mounted) {
                                       ScaffoldMessenger.of(context)
                                           .showSnackBar(
@@ -433,19 +527,38 @@ class _RecordingScreenState extends State<RecordingScreen>
                                     return;
                                   }
 
+                                  print(
+                                      '🔧 [DEBUG] Permissions granted, triggering animation');
                                   // Only trigger animation and recording after permissions granted
                                   if (_clickInput != null) {
+                                    print(
+                                        '🔧 [DEBUG] Setting clickInput to true');
                                     _clickInput!.value = true;
+                                  } else {
+                                    print('🔧 [DEBUG] clickInput is null');
                                   }
 
                                   // Ensure isPause is false
                                   if (_isPauseInput != null) {
+                                    print(
+                                        '🔧 [DEBUG] Setting isPauseInput to false');
                                     _isPauseInput!.value = false;
+                                  } else {
+                                    print('🔧 [DEBUG] isPauseInput is null');
                                   }
 
                                   // Start recording now that permissions are confirmed
+                                  print('🔧 [DEBUG] Starting recording audio');
                                   _startRecordingAudio();
+                                } else {
+                                  print(
+                                      '🔧 [DEBUG] Already recording, ignoring tap');
                                 }
+                              },
+                              // Add onTap to ensure the gesture is captured even if onTapDown fails
+                              onTap: () {
+                                print(
+                                    '🔧 [DEBUG] Tap completed on recording button');
                               },
                               child: Container(
                                 decoration: const BoxDecoration(

@@ -9,6 +9,12 @@ class AIAnalysisService {
   Future<Map<String, dynamic>> analyzeTranscription(
       String transcription) async {
     try {
+      // Validate input
+      if (transcription.isEmpty) {
+        debugPrint('❌ Empty transcription provided to AIAnalysisService');
+        return {'notes': [], 'tasks': []};
+      }
+
       debugPrint('🤖 OpenRouter (Mistral): Starting analysis...');
       debugPrint(
           '📝 Input text: "${transcription.substring(0, transcription.length > 100 ? 100 : transcription.length)}..."');
@@ -31,11 +37,14 @@ class AIAnalysisService {
                 'Analyze this transcribed speech and extract notes and tasks. Be thorough and make sure every important piece of information is captured either as a note or task: "$transcription"'
           }
         ],
+        'temperature': 0.7,
+        'max_tokens': 1024,
       };
 
       debugPrint('🌐 OpenRouter: Making API request...');
 
-      final response = await http.post(
+      final response = await http
+          .post(
         Uri.parse(baseUrl),
         headers: {
           'Content-Type': 'application/json',
@@ -44,6 +53,12 @@ class AIAnalysisService {
           'X-Title': 'Noteable App', // Optional: for analytics
         },
         body: json.encode(requestBody),
+      )
+          .timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          throw Exception('OpenRouter request timed out after 30 seconds');
+        },
       );
 
       debugPrint('📡 OpenRouter: Response status: ${response.statusCode}');
@@ -109,9 +124,31 @@ class AIAnalysisService {
         // Ensure arrays are lists of strings
         if (result['notes'] is! List) {
           result['notes'] = [];
+        } else {
+          // Filter out any empty notes
+          result['notes'] = (result['notes'] as List)
+              .where(
+                  (note) => note != null && note.toString().trim().isNotEmpty)
+              .map((note) => note.toString())
+              .toList();
         }
+
         if (result['tasks'] is! List) {
           result['tasks'] = [];
+        } else {
+          // Filter out any empty tasks
+          result['tasks'] = (result['tasks'] as List)
+              .where(
+                  (task) => task != null && task.toString().trim().isNotEmpty)
+              .map((task) => task.toString())
+              .toList();
+        }
+
+        // If both lists are empty but we had transcription, create a fallback note
+        if (result['notes'].isEmpty &&
+            result['tasks'].isEmpty &&
+            transcription.isNotEmpty) {
+          result['notes'] = ['Recorded: $transcription'];
         }
 
         debugPrint(
@@ -138,12 +175,16 @@ class AIAnalysisService {
     } catch (e) {
       debugPrint('❌ OpenRouter: Exception occurred: $e');
 
-      // Don't silently return empty results - rethrow the error so it can be handled properly
-      if (e is Exception) {
-        rethrow;
-      } else {
-        throw Exception('OpenRouter analysis failed: $e');
+      // Create a fallback result with the raw transcription as a note
+      if (transcription.isNotEmpty) {
+        return {
+          'notes': ['Recorded: $transcription'],
+          'tasks': []
+        };
       }
+
+      // Return empty result if we can't do anything else
+      return {'notes': [], 'tasks': []};
     }
   }
 }

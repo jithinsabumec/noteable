@@ -17,9 +17,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Firebase
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // Initialize Rive
   await rive.RiveFile.initialize();
@@ -106,7 +104,10 @@ class MorningIconPainter extends CustomPainter {
     // Main sun shape
     path.moveTo(size.width * 0.5, size.height * 0.35);
     canvas.drawCircle(
-        Offset(size.width * 0.5, size.height * 0.4), size.width * 0.15, paint);
+      Offset(size.width * 0.5, size.height * 0.4),
+      size.width * 0.15,
+      paint,
+    );
 
     // Rays
     for (int i = 0; i < 8; i++) {
@@ -119,8 +120,11 @@ class MorningIconPainter extends CustomPainter {
     }
 
     // Horizon line
-    canvas.drawLine(Offset(size.width * 0.2, size.height * 0.7),
-        Offset(size.width * 0.8, size.height * 0.7), paint);
+    canvas.drawLine(
+      Offset(size.width * 0.2, size.height * 0.7),
+      Offset(size.width * 0.8, size.height * 0.7),
+      paint,
+    );
   }
 
   @override
@@ -137,7 +141,10 @@ class AfternoonIconPainter extends CustomPainter {
 
     // Draw the afternoon icon (sun)
     canvas.drawCircle(
-        Offset(size.width * 0.5, size.height * 0.5), size.width * 0.2, paint);
+      Offset(size.width * 0.5, size.height * 0.5),
+      size.width * 0.2,
+      paint,
+    );
 
     // Rays
     for (int i = 0; i < 8; i++) {
@@ -166,14 +173,20 @@ class EveningIconPainter extends CustomPainter {
     // Moon crescent
     final path = Path();
     canvas.drawCircle(
-        Offset(size.width * 0.5, size.height * 0.5), size.width * 0.2, paint);
+      Offset(size.width * 0.5, size.height * 0.5),
+      size.width * 0.2,
+      paint,
+    );
 
     final erasePaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.fill;
 
-    canvas.drawCircle(Offset(size.width * 0.6, size.height * 0.4),
-        size.width * 0.18, erasePaint);
+    canvas.drawCircle(
+      Offset(size.width * 0.6, size.height * 0.4),
+      size.width * 0.18,
+      erasePaint,
+    );
   }
 
   @override
@@ -251,7 +264,8 @@ class _RiveAnimationFullscreenState extends State<RiveAnimationFullscreen>
       duration: const Duration(milliseconds: 400), // Faster fade in
     );
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(parent: _fadeController, curve: Curves.easeInOut));
+      CurvedAnimation(parent: _fadeController, curve: Curves.easeInOut),
+    );
     _fadeController.forward();
 
     _loadRiveAnimation();
@@ -315,7 +329,8 @@ class _RiveAnimationFullscreenState extends State<RiveAnimationFullscreen>
         // If no state machine, try to play a simple animation if available
         if (artboard.animations.isNotEmpty) {
           artboard.addController(
-              rive.SimpleAnimation(artboard.animations.first.name));
+            rive.SimpleAnimation(artboard.animations.first.name),
+          );
         }
       }
 
@@ -351,13 +366,8 @@ class _RiveAnimationFullscreenState extends State<RiveAnimationFullscreen>
         width: double.infinity,
         height: double.infinity,
         child: _isLoaded && _riveArtboard != null
-            ? rive.Rive(
-                artboard: _riveArtboard!,
-                fit: BoxFit.contain,
-              )
-            : const Center(
-                child: CircularProgressIndicator(),
-              ),
+            ? rive.Rive(artboard: _riveArtboard!, fit: BoxFit.contain)
+            : const Center(child: CircularProgressIndicator()),
       ),
     );
   }
@@ -460,7 +470,8 @@ class _AnimationSequenceControllerState
         artboard.addController(controller);
       } else if (artboard.animations.isNotEmpty) {
         artboard.addController(
-            rive.SimpleAnimation(artboard.animations.first.name));
+          rive.SimpleAnimation(artboard.animations.first.name),
+        );
       }
 
       // Update the state for the specific animation
@@ -519,30 +530,21 @@ class _AnimationSequenceControllerState
         _transcribeArtboard != null) {
       currentAnimationWidget = Opacity(
         opacity: _currentOpacity,
-        child: rive.Rive(
-          artboard: _transcribeArtboard!,
-          fit: BoxFit.contain,
-        ),
+        child: rive.Rive(artboard: _transcribeArtboard!, fit: BoxFit.contain),
       );
     } else if (_currentAnimation == 'understand' &&
         _understandLoaded &&
         _understandArtboard != null) {
       currentAnimationWidget = Opacity(
         opacity: _currentOpacity,
-        child: rive.Rive(
-          artboard: _understandArtboard!,
-          fit: BoxFit.contain,
-        ),
+        child: rive.Rive(artboard: _understandArtboard!, fit: BoxFit.contain),
       );
     } else if (_currentAnimation == 'extract' &&
         _extractLoaded &&
         _extractArtboard != null) {
       currentAnimationWidget = Opacity(
         opacity: _currentOpacity,
-        child: rive.Rive(
-          artboard: _extractArtboard!,
-          fit: BoxFit.contain,
-        ),
+        child: rive.Rive(artboard: _extractArtboard!, fit: BoxFit.contain),
       );
     }
 
@@ -553,30 +555,21 @@ class _AnimationSequenceControllerState
         _transcribeArtboard != null) {
       previousAnimationWidget = Opacity(
         opacity: _previousOpacity,
-        child: rive.Rive(
-          artboard: _transcribeArtboard!,
-          fit: BoxFit.contain,
-        ),
+        child: rive.Rive(artboard: _transcribeArtboard!, fit: BoxFit.contain),
       );
     } else if (_previousAnimation == 'understand' &&
         _understandLoaded &&
         _understandArtboard != null) {
       previousAnimationWidget = Opacity(
         opacity: _previousOpacity,
-        child: rive.Rive(
-          artboard: _understandArtboard!,
-          fit: BoxFit.contain,
-        ),
+        child: rive.Rive(artboard: _understandArtboard!, fit: BoxFit.contain),
       );
     } else if (_previousAnimation == 'extract' &&
         _extractLoaded &&
         _extractArtboard != null) {
       previousAnimationWidget = Opacity(
         opacity: _previousOpacity,
-        child: rive.Rive(
-          artboard: _extractArtboard!,
-          fit: BoxFit.contain,
-        ),
+        child: rive.Rive(artboard: _extractArtboard!, fit: BoxFit.contain),
       );
     }
 
@@ -589,13 +582,9 @@ class _AnimationSequenceControllerState
         fit: StackFit.expand,
         children: [
           if (previousAnimationWidget != null)
-            Positioned.fill(
-              child: previousAnimationWidget,
-            ),
+            Positioned.fill(child: previousAnimationWidget),
           if (currentAnimationWidget != null)
-            Positioned.fill(
-              child: currentAnimationWidget,
-            ),
+            Positioned.fill(child: currentAnimationWidget),
           if (currentAnimationWidget == null && previousAnimationWidget == null)
             const Center(child: CircularProgressIndicator()),
         ],

@@ -320,7 +320,14 @@ class _MainScreenState extends State<MainScreen>
       _isTranscribing = false;
       _isUnderstanding = false;
       _isAnalyzing = false;
+      _transcribedText = ''; // Reset transcribed text before each recording
     });
+
+    // Cancel any existing timer to avoid state conflicts
+    _animationSequenceTimer?.cancel();
+    _animationSequenceTimer = null;
+
+    debugPrint('🎙️ Starting new recording session');
 
     // Navigate to the recording page
     final result = await Navigator.push(
@@ -338,10 +345,15 @@ class _MainScreenState extends State<MainScreen>
       ),
     );
 
+    debugPrint('🎙️ Returned from recording screen with result: $result');
+
     // Handle result from recording page if needed
     if (result != null &&
         result['success'] == true &&
         result['filePath'] != null) {
+      debugPrint(
+          '🎙️ Got successful recording with file: ${result['filePath']}');
+
       // When we return from recording, the animation has already started there
       setState(() {
         _isTranscribing = true;
@@ -357,6 +369,7 @@ class _MainScreenState extends State<MainScreen>
       // Start actual transcription in the background
       await _transcribeAudio(result['filePath']);
     } else {
+      debugPrint('🎙️ Recording was cancelled or failed');
       // If recording was cancelled, make sure no animations are showing
       _animationSequenceTimer?.cancel();
       setState(() {
@@ -384,6 +397,9 @@ class _MainScreenState extends State<MainScreen>
         _isAnalyzing = false;
       });
     }
+
+    // Reset transcribed text at the beginning of each sequence
+    _transcribedText = '';
 
     // Start a sequence of timers for the animations
     _animationSequenceTimer = Timer(const Duration(seconds: 5), () {
@@ -419,20 +435,55 @@ class _MainScreenState extends State<MainScreen>
   // Transcribe audio using AssemblyAI
   Future<void> _transcribeAudio(String filePath) async {
     try {
-      _transcribedText = await _assemblyAIService.transcribeAudio(filePath);
-      debugPrint('Transcribed text: $_transcribedText');
+      final transcribedText =
+          await _assemblyAIService.transcribeAudio(filePath);
+      debugPrint('Transcribed text: $transcribedText');
+
+      // Store the transcribed text in the class variable
+      if (mounted) {
+        setState(() {
+          _transcribedText = transcribedText;
+        });
+      }
     } catch (e) {
       debugPrint('Transcription error: $e');
-      _transcribedText = 'Error transcribing audio: $e';
+      if (mounted) {
+        setState(() {
+          _transcribedText = 'Error transcribing audio: $e';
+        });
+      }
     }
   }
 
   // Perform the actual text processing after animations
   Future<void> _performActualTextProcessing(String text) async {
     try {
-      debugPrint('Starting text processing with: $text');
+      debugPrint(
+          'Starting text processing with initial text length: ${text.length}');
 
-      if (text.isEmpty || text.contains('Error transcribing audio')) {
+      // ------------------------------------------------------------------
+      // 1. Ensure we have transcription text. If `text` is empty, wait for
+      //    `_transcribedText` to be populated by the transcription future.
+      // ------------------------------------------------------------------
+
+      String textToProcess = text.trim();
+
+      if (textToProcess.isEmpty) {
+        // Wait (up to 30 s) for transcription to finish.
+        const int maxWaitSeconds = 30;
+        int waited = 0;
+        while (waited < maxWaitSeconds && _transcribedText.trim().isEmpty) {
+          await Future.delayed(const Duration(seconds: 1));
+          waited++;
+        }
+
+        // Use whatever we have now.
+        textToProcess = _transcribedText.trim();
+      }
+
+      // If still empty or contains an error string, abort gracefully.
+      if (textToProcess.isEmpty ||
+          textToProcess.contains('Error transcribing audio')) {
         debugPrint('Skipping processing due to empty or error text');
         setState(() {
           _showAnimations = false;
@@ -440,10 +491,24 @@ class _MainScreenState extends State<MainScreen>
           _isUnderstanding = false;
           _isAnalyzing = false;
         });
+
+        // Show error message to user if applicable
+        if (mounted && textToProcess.contains('Error transcribing audio')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to process audio. Please try again.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
         return;
       }
 
-      final result = await _aiAnalysisService.analyzeTranscription(text);
+      // At this point we have valid transcription text.
+
+      final String finalText = textToProcess;
+
+      final result = await _aiAnalysisService.analyzeTranscription(finalText);
       debugPrint('AI Analysis result: $result');
 
       // Extract notes and tasks from the LLM result
@@ -506,6 +571,16 @@ class _MainScreenState extends State<MainScreen>
         _isUnderstanding = false;
         _isAnalyzing = false;
       });
+
+      // Show error message to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error processing audio: $e'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 
@@ -637,12 +712,12 @@ class _MainScreenState extends State<MainScreen>
                                             padding: const EdgeInsets.symmetric(
                                                 horizontal: 8, vertical: 5),
                                             decoration: ShapeDecoration(
-                                              gradient: LinearGradient(
+                                              gradient: const LinearGradient(
                                                 begin: Alignment.topLeft,
                                                 end: Alignment.bottomRight,
                                                 colors: [
-                                                  const Color(0xFF5387FF),
-                                                  const Color(0xFF244CFF),
+                                                  Color(0xFF5387FF),
+                                                  Color(0xFF244CFF),
                                                 ],
                                               ),
                                               shape: RoundedRectangleBorder(
@@ -667,8 +742,8 @@ class _MainScreenState extends State<MainScreen>
                                                     BlendMode.srcIn,
                                                   ),
                                                 ),
-                                                SizedBox(width: 6),
-                                                Text(
+                                                const SizedBox(width: 6),
+                                                const Text(
                                                   'Upgrade',
                                                   textAlign: TextAlign.center,
                                                   style: TextStyle(
