@@ -11,6 +11,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'screens/auth_wrapper.dart';
 import 'screens/main_screen.dart';
+import 'debug_bar_heights.dart'; // Add this import
 
 void main() async {
   // Ensure Flutter is properly initialized with all bindings
@@ -57,8 +58,29 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         fontFamily: 'Geist',
       ),
-      home: AuthWrapper(
+      home: const AppHome(),
+    );
+  }
+}
+
+class AppHome extends StatelessWidget {
+  const AppHome({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: AuthWrapper(
         child: (isGuestMode) => MainScreen(isGuestMode: isGuestMode),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const DebugBarHeights()),
+          );
+        },
+        backgroundColor: Colors.red,
+        child: const Icon(Icons.bug_report),
       ),
     );
   }

@@ -39,7 +39,8 @@ class _RiveAudioVisualizerState extends State<RiveAudioVisualizer> {
 
   Future<void> _initializeServices() async {
     try {
-      await _audioFFTService.initialize(debugMode: widget.debugMode);
+      await _audioFFTService.initialize(
+          debugMode: widget.debugMode, useRealAudio: true);
       if (widget.debugMode) {
         _audioFFTService.setDebugCallback(_addDebugLog);
       }
@@ -113,7 +114,7 @@ class _RiveAudioVisualizerState extends State<RiveAudioVisualizer> {
         _controller = controller;
 
         // Set the Rive controller in the FFT service
-        _audioFFTService.setRiveController(controller);
+        _audioFFTService.connectToRiveController(controller);
       } else {
         _addDebugLog('❌ State machine not found: ${widget.stateMachineName}');
       }
@@ -185,6 +186,17 @@ class _RiveAudioVisualizerState extends State<RiveAudioVisualizer> {
                 onPressed: () => _audioFFTService.testIsRecord(value: false),
                 child: const Text('Force Stop'),
               ),
+              ElevatedButton(
+                onPressed: () => _audioFFTService.toggleAudioMode(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _audioFFTService.useRealAudio
+                      ? Colors.green
+                      : Colors.orange,
+                ),
+                child: Text(_audioFFTService.useRealAudio
+                    ? 'Real Audio'
+                    : 'Simulation'),
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -204,6 +216,10 @@ class _RiveAudioVisualizerState extends State<RiveAudioVisualizer> {
                   style: const TextStyle(color: Colors.white),
                 ),
                 Text(
+                  'Mode: ${_audioFFTService.useRealAudio ? "🎙️ Real Audio" : "🎲 Simulation"}',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                Text(
                   'Audio Level: ${_audioFFTService.currentAudioLevel.toStringAsFixed(2)}',
                   style: const TextStyle(color: Colors.white),
                 ),
@@ -218,7 +234,7 @@ class _RiveAudioVisualizerState extends State<RiveAudioVisualizer> {
 
           // Current frequency bands
           const Text(
-            'Frequency Bands:',
+            'Frequency Bands (Raw):',
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
@@ -239,6 +255,36 @@ class _RiveAudioVisualizerState extends State<RiveAudioVisualizer> {
                   ),
                   child: Text(
                     'B${i + 1}: ${_audioFFTService.frequencyBands[i].toStringAsFixed(1)}',
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // Smoothed frequency bands (what's sent to Rive)
+          const Text(
+            'Smoothed Bands (Sent to Rive):',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            children: [
+              for (int i = 0; i < 7; i++)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    'B${i + 1}: ${_audioFFTService.smoothedBands[i].toStringAsFixed(1)}',
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ),

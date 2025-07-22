@@ -19,6 +19,7 @@ import 'recording_screen.dart';
 import 'subscription_screen.dart';
 import '../services/item_management_service.dart';
 import '../widgets/dialogs/item_options_dialog.dart';
+import '../test_audio_viz.dart';
 
 class MainScreen extends StatefulWidget {
   final bool isGuestMode;
@@ -907,12 +908,17 @@ class _MainScreenState extends State<MainScreen>
             ),
 
           // Add temporary debug button for testing
-          if (false) // Set to false to hide after testing
+          if (true) // Enable for testing
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: ElevatedButton(
                 onPressed: () {
-                  Navigator.pushNamed(context, '/debug_audio');
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const TestAudioVisualization(),
+                    ),
+                  );
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.orange,

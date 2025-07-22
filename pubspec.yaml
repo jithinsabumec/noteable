@@ -53,6 +53,9 @@ dependencies:
   google_fonts: ^6.1.0
   rive_native: ^0.0.3
 
+  # Audio processing for real-time frequency analysis
+  fftea: ^1.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -31,6 +31,7 @@ class _RecordingScreenState extends State<RecordingScreen>
   rive.StateMachineController? _controller;
   rive.SMIInput<bool>? _clickInput;
   rive.SMIInput<bool>? _isPauseInput;
+  rive.SMIInput<bool>? _isRecordInput;
 
   // For the Rive animation widget
   rive.Artboard? _riveArtboard;
@@ -56,9 +57,15 @@ class _RecordingScreenState extends State<RecordingScreen>
       // Reset the AudioFFTService to ensure a clean state
       await _audioFFTService.reset();
 
-      // Initialize the AudioFFTService
-      await _audioFFTService.initialize(debugMode: true);
-      print('🔧 [DEBUG] AudioFFTService initialized successfully');
+      // Initialize the AudioFFTService with real audio
+      await _audioFFTService.initialize(debugMode: true, useRealAudio: true);
+      print(
+          '🔧 [DEBUG] AudioFFTService initialized successfully with real audio');
+
+      // Set up debug callback to see AudioFFTService logs
+      _audioFFTService.setDebugCallback((message) {
+        print('🎤 [AudioFFT] $message');
+      });
 
       // Create a fresh recorder instance
       _audioRecorder.dispose();
@@ -149,7 +156,21 @@ class _RecordingScreenState extends State<RecordingScreen>
         // Find inputs
         _clickInput = controller.findInput<bool>('Click');
         _isPauseInput = controller.findInput<bool>('isPause');
+        _isRecordInput = controller.findInput<bool>('isRecord');
         var isRecordingInput = controller.findInput<bool>('IsRecording');
+
+        // Debug: Log which inputs were found
+        print('🔧 [DEBUG] Found inputs:');
+        print('   Click: ${_clickInput != null}');
+        print('   isPause: ${_isPauseInput != null}');
+        print('   isRecord: ${_isRecordInput != null}');
+        print('   IsRecording: ${isRecordingInput != null}');
+
+        // List all available inputs for debugging
+        print('🔧 [DEBUG] All available inputs:');
+        for (final input in controller.inputs) {
+          print('   - ${input.name} (${input.runtimeType})');
+        }
 
         // Reset the click input to ensure it's ready for a new recording
         if (_clickInput != null) {
@@ -160,15 +181,19 @@ class _RecordingScreenState extends State<RecordingScreen>
           _isPauseInput!.value = false;
         }
 
+        if (_isRecordInput != null) {
+          _isRecordInput!.value = false;
+        }
+
         if (isRecordingInput != null) {
           isRecordingInput.value = false;
         }
 
         _controller = controller;
 
-        // Set the Rive controller in the FFT service
-        _audioFFTService.setRiveController(controller);
-        print('🔧 [DEBUG] Rive controller set in AudioFFTService');
+        // Connect the Rive controller to the FFT service
+        _audioFFTService.connectToRiveController(controller);
+        print('🔧 [DEBUG] Rive controller connected to AudioFFTService');
       } else {
         print('🔧 [DEBUG] No state machine controller found');
       }
@@ -244,8 +269,18 @@ class _RecordingScreenState extends State<RecordingScreen>
         _recordingDuration = 0;
       });
 
-      // We don't need to trigger the animation manually here
-      // since it should already be triggered by the GestureDetector
+      // Set the isRecord input to true to trigger audio visualization
+      if (_isRecordInput != null) {
+        print('🔧 [DEBUG] Setting isRecord input to true...');
+        _isRecordInput!.value = true;
+        print('🔧 [DEBUG] isRecord input set to: ${_isRecordInput!.value}');
+        print('🔧 [DEBUG] Audio visualization should now start');
+      } else {
+        print(
+            '🔧 [DEBUG] ❌ isRecord input not found - audio visualization will not work');
+        print(
+            '🔧 [DEBUG] Available inputs were listed during Rive initialization');
+      }
 
       // Start timer for duration
       _timer?.cancel(); // Cancel any existing timer
@@ -290,6 +325,10 @@ class _RecordingScreenState extends State<RecordingScreen>
           _isPauseInput!.value =
               false; // Set isPause to false to resume animation
         }
+        // Keep isRecord true when resuming
+        if (_isRecordInput != null) {
+          _isRecordInput!.value = true;
+        }
       } else {
         // Currently recording, so we are pausing
         await _audioRecorder.pause();
@@ -298,6 +337,10 @@ class _RecordingScreenState extends State<RecordingScreen>
         // Update Rive animation state - pausing
         if (_isPauseInput != null) {
           _isPauseInput!.value = true; // Set isPause to true to pause animation
+        }
+        // Keep isRecord true when pausing (just pause the animation, not stop visualization)
+        if (_isRecordInput != null) {
+          _isRecordInput!.value = true;
         }
       }
 
@@ -337,6 +380,11 @@ class _RecordingScreenState extends State<RecordingScreen>
       }
       if (_isPauseInput != null) {
         _isPauseInput!.value = false; // Ensure isPause is set to false
+      }
+      if (_isRecordInput != null) {
+        _isRecordInput!.value = false; // Stop audio visualization
+        print(
+            '🔧 [DEBUG] Set isRecord input to false to stop audio visualization');
       }
 
       setState(() {
