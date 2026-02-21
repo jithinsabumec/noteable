@@ -6,11 +6,22 @@ import '../config.dart';
 
 class AssemblyAIService {
   static const String _baseUrl = 'https://api.assemblyai.com/v2';
+  String get _apiKey => Config.assemblyAIKey.trim();
+
+  void _validateApiKey() {
+    if (_apiKey.isEmpty) {
+      throw Exception(
+        'AssemblyAI API key is missing. Start the app with --dart-define-from-file=secrets.json or --dart-define=ASSEMBLY_AI_KEY=...',
+      );
+    }
+  }
 
   // Upload audio file and get transcription
   Future<String> transcribeAudio(String filePath) async {
     try {
+      _validateApiKey();
       debugPrint('Starting AssemblyAI transcription for: $filePath');
+      debugPrint('AssemblyAI key loaded (length: ${_apiKey.length})');
 
       // Verify file exists and is readable
       final file = File(filePath);
@@ -59,7 +70,7 @@ class AssemblyAIService {
           .post(
         Uri.parse('$_baseUrl/upload'),
         headers: {
-          'authorization': Config.assemblyAIKey,
+          'authorization': _apiKey,
           'content-type': 'application/octet-stream',
         },
         body: bytes,
@@ -94,7 +105,7 @@ class AssemblyAIService {
           .post(
         Uri.parse('$_baseUrl/transcript'),
         headers: {
-          'authorization': Config.assemblyAIKey,
+          'authorization': _apiKey,
           'content-type': 'application/json',
         },
         body: json.encode({
@@ -136,7 +147,7 @@ class AssemblyAIService {
         final response = await http.get(
           Uri.parse('$_baseUrl/transcript/$transcriptId'),
           headers: {
-            'authorization': Config.assemblyAIKey,
+            'authorization': _apiKey,
           },
         ).timeout(
           const Duration(seconds: 15),

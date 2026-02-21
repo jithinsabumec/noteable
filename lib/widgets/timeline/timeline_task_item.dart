@@ -29,7 +29,7 @@ class TimelineTaskItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const double riveDisplaySize = 18.0; // Reduced from 36.0 to 20.0
+    const double riveDisplaySize = 28.0;
     const double desiredLayoutHeight = riveDisplaySize; // Don't reduce height
 
     // Original X/Y offset values
@@ -41,7 +41,7 @@ class TimelineTaskItem extends StatelessWidget {
         task.task.length < 40; // Assuming average 40 chars fit on a line
 
     // Conditional styling based on line count
-    final double riveTopPadding = isLikelySingleLine ? 7.0 : 9.0;
+    final double riveTopPadding = isLikelySingleLine ? 2.0 : 4.0;
     final double textTopPadding = isLikelySingleLine ? 8.0 : 6.0;
     final double textBottomPadding = isLikelySingleLine ? 8.0 : 4.0;
 
@@ -84,7 +84,7 @@ class TimelineTaskItem extends StatelessWidget {
             children: [
               Padding(
                 padding: EdgeInsets.only(
-                    left: 8.0, top: riveTopPadding), // Conditional top padding
+                    left: 2.0, top: riveTopPadding), // Reduced left padding from 8.0 to 2.0
                 child: RiveCheckbox(
                   isChecked: task.completed,
                   onChanged: (bool? newValue) {
@@ -101,7 +101,7 @@ class TimelineTaskItem extends StatelessWidget {
                   size: riveDisplaySize,
                 ),
               ),
-              const SizedBox(width: 8), // Small gap between checkbox and text
+              const SizedBox(width: 3), // Reduced gap from 8 to 2
               Expanded(
                 child: Padding(
                   padding: EdgeInsets.only(

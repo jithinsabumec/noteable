@@ -4,7 +4,7 @@ import 'package:noteable/screens/login_screen.dart';
 import 'package:noteable/services/auth_service.dart';
 
 class AuthWrapper extends StatefulWidget {
-  final Widget Function(bool isGuestMode) child;
+  final Widget Function(bool isGuestMode, VoidCallback onExitGuestMode) child;
 
   const AuthWrapper({super.key, required this.child});
 
@@ -29,7 +29,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
     // If guest mode is enabled, show the main app with guest mode indicator
     if (_isGuestMode) {
-      return widget.child(_isGuestMode);
+      return widget.child(_isGuestMode, () {
+        setState(() {
+          _isGuestMode = false;
+        });
+      });
     }
 
     // If there was an error, show error screen
@@ -69,7 +73,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
           if (snapshot.hasData) {
             try {
               // User is logged in, show the main app with authenticated user state
-              return widget.child(false); // Not guest mode
+              return widget.child(false, () {}); // Not guest mode, empty callback
             } catch (e) {
               // Log the error for debugging
               print('MAIN APP RENDERING ERROR: $e');

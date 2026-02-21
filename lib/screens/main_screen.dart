@@ -17,13 +17,19 @@ import '../widgets/timeline/timeline_renderer.dart';
 import '../widgets/guest_recording_counter.dart';
 import 'subscription_screen.dart';
 import '../services/item_management_service.dart';
+import '../services/purchase_service.dart';
 import '../widgets/dialogs/item_options_dialog.dart';
 
 
 class MainScreen extends StatefulWidget {
   final bool isGuestMode;
+  final VoidCallback onExitGuestMode;
 
-  const MainScreen({super.key, required this.isGuestMode});
+  const MainScreen({
+    super.key,
+    required this.isGuestMode,
+    required this.onExitGuestMode,
+  });
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -44,6 +50,8 @@ class _MainScreenState extends State<MainScreen>
   final _itemManagementService = ItemManagementService();
   // Guest mode service
   final _guestModeService = GuestModeService();
+  // Purchase service
+  final _purchaseService = PurchaseService();
 
   // Map to store entries by timestamp for the currently selected date
   final Map<String, List<TimelineEntry>> _timelineEntriesByDate = {};
@@ -183,6 +191,8 @@ class _MainScreenState extends State<MainScreen>
   Future<void> _signOut() async {
     try {
       await _authService.signOut();
+      // Reset guest mode if applicable
+      widget.onExitGuestMode();
       // The AuthWrapper will automatically handle the UI transition back to login screen
     } catch (e) {
       // Show error dialog if signout fails
@@ -532,7 +542,7 @@ class _MainScreenState extends State<MainScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             // Guest recording counter above the Rive animation
-            if (widget.isGuestMode) ...[
+            if (widget.isGuestMode && !_purchaseService.isPremium) ...[
               GuestRecordingCounter(
                 recordingsUsed: _guestRecordingCount,
                 maxRecordings: _guestModeService.maxRecordings,
@@ -542,15 +552,15 @@ class _MainScreenState extends State<MainScreen>
 
             // Bottom bar Rive animation
             Container(
-              width: 335, // Further reduced width to clip more from the sides
-              height: 70, // Further reduced height to clip more from top/bottom
+              width: 341, // Slightly wider touch/crop area (+6px)
+              height: 70,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(35.0),
               ),
               child: ClipRect(
                 child: OverflowBox(
-                  minWidth: 600, // Keep original Rive animation width
-                  maxWidth: 600,
+                  minWidth: 606, // Slightly larger interaction area (+6px)
+                  maxWidth: 606,
                   minHeight: 250, // Keep original Rive animation height
                   maxHeight: 250,
                   child: Container(
@@ -563,6 +573,17 @@ class _MainScreenState extends State<MainScreen>
                         isGuestMode: widget.isGuestMode,
                         guestModeService: _guestModeService,
                         onGuestRecordingCountUpdate: _loadGuestRecordingCount,
+                        onShowPaywall: widget.isGuestMode
+                            ? () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const SubscriptionScreen(),
+                                  ),
+                                ).then((_) => setState(() {}));
+                              }
+                            : null,
                       ),
                     ),
                   ),
@@ -624,7 +645,7 @@ class _MainScreenState extends State<MainScreen>
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     // Upgrade button for guest mode only
-                                    if (widget.isGuestMode) ...[
+                                    if (widget.isGuestMode && !_purchaseService.isPremium) ...[
                                       GestureDetector(
                                         onTap: () {
                                           Navigator.push(

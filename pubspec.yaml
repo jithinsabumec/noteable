@@ -55,6 +55,7 @@ dependencies:
 
   # Audio processing for real-time frequency analysis
   fftea: ^1.0.0
+  purchases_flutter: ^9.12.2
 
 dev_dependencies:
   flutter_test:

@@ -14,6 +14,7 @@ import '../services/ai_analysis_service.dart';
 import '../services/assembly_ai_service.dart';
 import '../services/guest_mode_service.dart';
 import '../services/item_management_service.dart';
+import '../services/purchase_service.dart';
 import '../widgets/bottom_sheets/add_item_bottom_sheet.dart';
 
 class RiveAnimationWidget extends StatefulWidget {
@@ -23,6 +24,8 @@ class RiveAnimationWidget extends StatefulWidget {
   final bool isGuestMode;
   final GuestModeService? guestModeService;
   final VoidCallback? onGuestRecordingCountUpdate;
+  /// Called when guest hits recording limit - show paywall/subscription screen
+  final VoidCallback? onShowPaywall;
 
   const RiveAnimationWidget({
     super.key,
@@ -32,6 +35,7 @@ class RiveAnimationWidget extends StatefulWidget {
     this.isGuestMode = false,
     this.guestModeService,
     this.onGuestRecordingCountUpdate,
+    this.onShowPaywall,
   });
 
   @override
@@ -44,6 +48,7 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
   RiveWidgetController? _riveWidgetController;
   StateMachine? controller;
   ViewModelInstance? _viewModelInstance;
+  int _riveRebuildNonce = 0;
 
   // Audio services
   // AudioRecorder is recreated for every recording cycle to prevent the
@@ -53,6 +58,7 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
   final _assemblyAIService = AssemblyAIService();
   final _aiAnalysisService = AIAnalysisService();
   final _itemManagementService = ItemManagementService();
+  final _purchaseService = PurchaseService();
 
   // Recording state
   bool _isRecording = false;
@@ -60,6 +66,8 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
   DateTime? _recordingStartTime;
   bool _isStartingRecording = false;
   bool _isStoppingRecording = false;
+  bool _hasSubmitIntent = false;
+  bool _isSubmitFlowActive = false;
 
   // Processing states
   bool _isTranscribing = false;
@@ -428,20 +436,18 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
     _lastRecordInteractionAt = DateTime.now();
   }
 
-  bool _isWithinRecordInteractionGuardWindow() {
-    const guardWindow = Duration(milliseconds: 1200);
-    return DateTime.now().difference(_lastRecordInteractionAt) < guardWindow;
-  }
-
   bool _canOpenAddBottomSheet() {
     if (!mounted) return false;
     if (_isInitializing) return false;
     if (_isAddBottomSheetOpen) return false;
-    if (_isRecording || _isTranscribing || _isAnalyzing) return false;
+    if (_isStartingRecording || _isStoppingRecording) return false;
+    if (_isSubmitFlowActive) return false;
+    if (_isRecording) return false;
+    if (_hasSubmitIntent) return false;
+    if (_isTranscribing || _isAnalyzing) return false;
     if ((_isRecordInput?.value ?? false) || (_isSubmitInput?.value ?? false)) {
       return false;
     }
-    if (_isWithinRecordInteractionGuardWindow()) return false;
     return true;
   }
 
@@ -470,11 +476,13 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
     }
 
     _markRecordInteraction();
+    _hasSubmitIntent = false;
+    _isSubmitFlowActive = false;
     unawaited(_playStartRecordingSound());
     await _startRecording();
   }
 
-  Future<void> _requestStopRecording() async {
+  Future<void> _requestStopRecording({bool forceProcess = false}) async {
     if (_isStartingRecording || _isStoppingRecording) {
       return;
     }
@@ -485,8 +493,10 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
     }
 
     _markRecordInteraction();
+    final shouldProcess =
+        forceProcess || _hasSubmitIntent || (_isSubmitInput?.value ?? false);
     unawaited(_playEndRecordingSound());
-    await _stopRecording();
+    await _stopRecording(shouldProcess: shouldProcess);
   }
 
   void _detachRiveStateMachineListeners() {
@@ -496,6 +506,31 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
     if (controller != null) {
       controller!.removeEventListener(_onRiveEvent);
     }
+  }
+
+  void _forceRebuildRiveToInitial() {
+    debugPrint('🔄 Forcing hard Rive rebuild to initial state');
+    _detachRiveStateMachineListeners();
+    _riveWidgetController = null;
+    controller = null;
+    _viewModelInstance = null;
+    _isRecordInput = null;
+    _clickInput = null;
+    _isSubmitInput = null;
+    _isDoneInput = null;
+    _taskSelectedInput = null;
+    _noteSelectedInput = null;
+
+    if (!mounted) return;
+    setState(() {
+      _isInitializing = true;
+      _riveRebuildNonce++;
+    });
+  }
+
+  void _resetAfterError() {
+    _immediateStateReset();
+    _forceRebuildRiveToInitial();
   }
 
   void _configureInputsFromController() {
@@ -618,8 +653,8 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
           // Start recording when isRecord becomes true
           unawaited(_requestStartRecording());
         } else if (!currentIsRecord && _isRecording) {
-          // Stop recording when isRecord becomes false
-          unawaited(_requestStopRecording());
+          // Record toggle off / cancel: stop recording without processing.
+          unawaited(_requestStopRecording(forceProcess: false));
         } else if (currentIsRecord && (_isTranscribing || _isAnalyzing)) {
           _resetRecordIntentInputs();
         }
@@ -631,8 +666,14 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
         debugPrint('🎨 Rive isSubmit changed: $currentIsSubmit');
         _markRecordInteraction();
         if (currentIsSubmit && _isRecording) {
-          unawaited(_requestStopRecording());
+          _hasSubmitIntent = true;
+          _isSubmitFlowActive = true;
+          _resetTaskSelected();
+          _resetNoteSelected();
+          unawaited(_requestStopRecording(forceProcess: true));
         } else if (currentIsSubmit && !_isRecording) {
+          _hasSubmitIntent = false;
+          _isSubmitFlowActive = false;
           _resetRecordIntentInputs();
         }
         previousIsSubmit = currentIsSubmit;
@@ -642,7 +683,12 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       if (currentTaskSelected != previousTaskSelected) {
         debugPrint('🎨 Rive taskSelected changed: $currentTaskSelected');
         if (currentTaskSelected) {
-          if (_canOpenAddBottomSheet()) {
+          if (_isSubmitFlowActive ||
+              _hasSubmitIntent ||
+              _isTranscribing ||
+              _isAnalyzing) {
+            _resetTaskSelected();
+          } else if (_canOpenAddBottomSheet()) {
             _showTaskBottomSheet();
           } else {
             debugPrint(
@@ -657,7 +703,12 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       if (currentNoteSelected != previousNoteSelected) {
         debugPrint('🎨 Rive noteSelected changed: $currentNoteSelected');
         if (currentNoteSelected) {
-          if (_canOpenAddBottomSheet()) {
+          if (_isSubmitFlowActive ||
+              _hasSubmitIntent ||
+              _isTranscribing ||
+              _isAnalyzing) {
+            _resetNoteSelected();
+          } else if (_canOpenAddBottomSheet()) {
             _showNoteBottomSheet();
           } else {
             debugPrint(
@@ -696,8 +747,14 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       case 'StopRecording':
         _markRecordInteraction();
         if (_isRecording) {
-          unawaited(_requestStopRecording());
+          _hasSubmitIntent = true;
+          _isSubmitFlowActive = true;
+          _resetTaskSelected();
+          _resetNoteSelected();
+          unawaited(_requestStopRecording(forceProcess: true));
         } else {
+          _hasSubmitIntent = false;
+          _isSubmitFlowActive = false;
           _resetRecordIntentInputs();
         }
         break;
@@ -740,14 +797,18 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
     }
 
     _isStartingRecording = true;
+    _hasSubmitIntent = false;
+    _isSubmitFlowActive = false;
 
     // Check guest mode recording limits
     try {
-      if (widget.isGuestMode && widget.guestModeService != null) {
+      if (widget.isGuestMode && widget.guestModeService != null && !_purchaseService.isPremium) {
         final canRecord = await widget.guestModeService!.canRecord();
         if (!canRecord) {
           debugPrint('❌ Guest mode recording limit reached');
           _resetRecordIntentInputs();
+          _isStartingRecording = false;
+          widget.onShowPaywall?.call();
           return;
         }
       }
@@ -811,12 +872,18 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       });
       _stopBarVisualization(resetBars: true);
       _resetRecordIntentInputs();
+      _resetAfterError();
+      _showErrorSnackBar(_toUserFriendlyErrorMessage(
+        e,
+        fallback:
+            'Couldn\'t start recording. Please check microphone access and try again.',
+      ));
     } finally {
       _isStartingRecording = false;
     }
   }
 
-  Future<void> _stopRecording() async {
+  Future<void> _stopRecording({required bool shouldProcess}) async {
     if (_isStoppingRecording || _isStartingRecording) {
       return;
     }
@@ -840,15 +907,30 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       debugPrint('✅ Recording stopped, path: $path');
 
       if (path != null) {
-        // Comprehensive file validation
-        await _validateAudioFile(path);
-        debugPrint('✅ Audio file validation passed');
+        if (shouldProcess) {
+          // Comprehensive file validation
+          await _validateAudioFile(path);
+          debugPrint('✅ Audio file validation passed');
 
-        // Start the transcription and processing workflow
-        await _processRecording(path);
+          // Start the transcription and processing workflow
+          await _processRecording(path);
+        } else {
+          // Cancel flow: intentionally discard recording and skip processing.
+          debugPrint('⏹️ Recording canceled - skipping transcription/analysis');
+          try {
+            final file = io.File(path);
+            if (await file.exists()) {
+              await file.delete();
+            }
+          } catch (_) {}
+          _resetRecordIntentInputs();
+        }
       } else {
-        debugPrint('❌ Recording path is null');
-        throw Exception('Recording failed - no file path returned');
+        if (shouldProcess) {
+          debugPrint('❌ Recording path is null');
+          throw Exception('Recording failed - no file path returned');
+        }
+        _resetRecordIntentInputs();
       }
 
       // Dispose the recorder so we can recreate a fresh instance next time
@@ -867,18 +949,17 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       });
       _resetRecordIntentInputs();
 
-      // Show error to user
-      _showErrorSnackBar('Recording failed: ${e.toString()}');
-
-      // Set isDone to true to stop loading animation
-      if (_isDoneInput != null) {
-        _isDoneInput!.value = true;
-      }
-
-      // Schedule reset after error
-      _scheduleStateReset();
+      _resetAfterError();
+      _showErrorSnackBar(_toUserFriendlyErrorMessage(
+        e,
+        fallback: 'Recording stopped unexpectedly. Please try again.',
+      ));
     } finally {
       _isStoppingRecording = false;
+      _hasSubmitIntent = false;
+      if (!_isTranscribing && !_isAnalyzing) {
+        _isSubmitFlowActive = false;
+      }
     }
   }
 
@@ -906,10 +987,11 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
   Future<void> _processRecording(String filePath) async {
     try {
       // Step 1: Transcribe audio
-      setState(() {
-        _isTranscribing = true;
-        _isAnalyzing = false;
-      });
+    setState(() {
+      _isTranscribing = true;
+      _isAnalyzing = false;
+    });
+    _isSubmitFlowActive = true;
 
       try {
         debugPrint('🎙️ Starting transcription for: $filePath');
@@ -940,16 +1022,11 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
         _lastError = e.toString();
       });
 
-      // Show error to user
-      _showErrorSnackBar('Recording processing failed: ${e.toString()}');
-
-      // Set isDone to true even on error to stop loading animation
-      if (_isDoneInput != null) {
-        _isDoneInput!.value = true;
-      }
-
-      // Schedule reset even after error
-      _scheduleStateReset();
+      _resetAfterError();
+      _showErrorSnackBar(_toUserFriendlyErrorMessage(
+        e,
+        fallback: 'We couldn\'t process that recording. Please try again.',
+      ));
     }
   }
 
@@ -961,6 +1038,7 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       _isTranscribing = false;
       _isAnalyzing = true;
     });
+    _isSubmitFlowActive = true;
 
     try {
       debugPrint('🤖 Starting AI analysis with Mistral...');
@@ -987,9 +1065,6 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
 
       if (!hasNotes && !hasTasks) {
         debugPrint('⚠️ No notes or tasks extracted from transcription');
-        // Still proceed to show completion, but with a different message
-        _showInfoSnackBar(
-            'Audio transcribed successfully, but no actionable items were found.');
       } else {
         debugPrint(
             '📝 Found ${result['notes']?.length ?? 0} notes and ${result['tasks']?.length ?? 0} tasks');
@@ -1020,12 +1095,6 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
         }
       });
 
-      // Show success message
-      if (hasNotes || hasTasks) {
-        _showSuccessSnackBar(
-            'Recording processed successfully! Added ${result['notes']?.length ?? 0} notes and ${result['tasks']?.length ?? 0} tasks.');
-      }
-
       // Schedule reset for next recording
       _scheduleStateReset();
     } catch (e) {
@@ -1039,17 +1108,11 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
         _lastError = e.toString();
       });
 
-      // Show error to user
-      _showErrorSnackBar('AI analysis failed: ${e.toString()}');
-
-      // Set isDone to true even on error to stop loading animation
-      if (_isDoneInput != null) {
-        _isDoneInput!.value = true;
-        debugPrint('✅ Set isDone to true after error');
-      }
-
-      // Schedule reset even after error
-      _scheduleStateReset();
+      _resetAfterError();
+      _showErrorSnackBar(_toUserFriendlyErrorMessage(
+        e,
+        fallback: 'We couldn\'t analyze that recording. Please try again.',
+      ));
     }
   }
 
@@ -1132,6 +1195,7 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       _hasProcessingError = false;
       _lastError = null;
     });
+    _isSubmitFlowActive = false;
 
     // Reset all Rive inputs
     if (_isRecordInput != null) {
@@ -1176,6 +1240,7 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
         _hasProcessingError = false;
         _lastError = null;
       });
+      _isSubmitFlowActive = false;
 
       // Reset all Rive inputs
       if (_isRecordInput != null) {
@@ -1396,6 +1461,7 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
     }
 
     return RiveWidgetBuilder(
+      key: ValueKey('bottom-rive-${_riveRebuildNonce}'),
       fileLoader: loader,
       controller: _buildRiveController,
       builder: _buildRiveState,
@@ -1406,6 +1472,52 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
   }
 
   // Helper methods for user feedback
+  String _toUserFriendlyErrorMessage(
+    Object error, {
+    required String fallback,
+  }) {
+    final message = error.toString().toLowerCase();
+
+    if (message.contains('permission') || message.contains('microphone')) {
+      return 'Microphone access is required to record. Please enable it and try again.';
+    }
+    if (message.contains('401') ||
+        message.contains('unauthorized') ||
+        message.contains('forbidden') ||
+        message.contains('invalid api key') ||
+        message.contains('api key')) {
+      return 'Audio service authentication failed. Please check the API key configuration and try again.';
+    }
+    if (message.contains('network') ||
+        message.contains('socket') ||
+        message.contains('timeout') ||
+        message.contains('upload') ||
+        message.contains('connection')) {
+      return 'Network issue while processing audio. Please check your connection and try again.';
+    }
+    if (message.contains('empty text') ||
+        message.contains('no speech') ||
+        message.contains('empty')) {
+      return 'We couldn\'t hear clear speech. Please record again.';
+    }
+    if (message.contains('recording file') ||
+        message.contains('file not found') ||
+        message.contains('file path') ||
+        message.contains('0 bytes')) {
+      return 'The recording could not be read. Please record again.';
+    }
+    if (message.contains('transcription failed')) {
+      return 'We couldn\'t transcribe your recording right now. Please try again.';
+    }
+    if (message.contains('analysis failed') ||
+        message.contains('invalid response format') ||
+        message.contains('invalid response')) {
+      return 'We couldn\'t analyze your recording right now. Please try again.';
+    }
+
+    return fallback;
+  }
+
   void _showErrorSnackBar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1420,17 +1532,6 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
             ScaffoldMessenger.of(context).hideCurrentSnackBar();
           },
         ),
-      ),
-    );
-  }
-
-  void _showSuccessSnackBar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 3),
       ),
     );
   }

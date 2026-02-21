@@ -36,8 +36,8 @@ class GuestModeService {
 
   /// Check if the user can still record in guest mode
   Future<bool> canRecord() async {
-    // Always return true for testing
-    return true;
+    final currentCount = await getRecordingCount();
+    return currentCount < _maxGuestRecordings;
   }
 
   /// Get how many recordings are left for guest mode

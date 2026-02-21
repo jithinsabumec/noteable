@@ -8,12 +8,18 @@ import 'package:rive/rive.dart' as rive;
 import 'firebase_options.dart';
 import 'screens/auth_wrapper.dart';
 import 'screens/main_screen.dart';
+import 'services/auth_service.dart';
+import 'services/purchase_service.dart';
 import 'services/storage_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Initialize RevenueCat with user ID if logged in (links purchases across devices)
+  final appUserId = AuthService().getUserId();
+  await PurchaseService().initialize(appUserId: appUserId);
 
   final riveReady = await rive.RiveNative.init();
   if (!riveReady) {
@@ -62,7 +68,10 @@ class AppHome extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       body: AuthWrapper(
-        child: (isGuestMode) => MainScreen(isGuestMode: isGuestMode),
+        child: (isGuestMode, onExitGuestMode) => MainScreen(
+          isGuestMode: isGuestMode,
+          onExitGuestMode: onExitGuestMode,
+        ),
       ),
     );
   }

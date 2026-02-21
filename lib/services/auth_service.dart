@@ -1,19 +1,30 @@
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import '../config.dart';
+import 'purchase_service.dart';
 
 class AuthService {
   // Create a singleton instance
   static final AuthService _instance = AuthService._internal();
   factory AuthService() => _instance;
-  AuthService._internal();
+  AuthService._internal() {
+    // Listen to auth changes and sync with RevenueCat
+    _auth.authStateChanges().listen((user) {
+      if (user != null) {
+        PurchaseService().logIn(user.uid);
+      } else {
+        PurchaseService().logOut();
+      }
+    });
+  }
 
   // Firebase Auth instance
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   // Google Sign In instance with updated configuration
   final GoogleSignIn _googleSignIn = GoogleSignIn(
-    clientId:
-        '103978403761-ejgfbeda55lnj04m5j3dkbbh23n9pdnq.apps.googleusercontent.com',
+    clientId: Config.googleClientId.isEmpty ? null : Config.googleClientId,
     scopes: [
       'email',
       'profile',
@@ -115,10 +126,16 @@ class AuthService {
   Future<void> signOut() async {
     try {
       // Sign out of Google if signed in with Google
-      await _googleSignIn.signOut();
+      try {
+        await _googleSignIn.signOut();
+      } catch (e) {
+        debugPrint('Google Sign-In out error: $e');
+      }
+
       // Sign out of Firebase
       await _auth.signOut();
     } catch (e) {
+      debugPrint('Firebase Sign-Out error: $e');
       rethrow;
     }
   }
