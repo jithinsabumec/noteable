@@ -5,6 +5,7 @@ import '../config.dart';
 
 class AIAnalysisService {
   final String baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
+  static const String model = 'nvidia/nemotron-nano-12b-v2-vl:free';
 
   Future<Map<String, dynamic>> analyzeTranscription(
       String transcription) async {
@@ -15,26 +16,24 @@ class AIAnalysisService {
         return {'notes': [], 'tasks': []};
       }
 
-      debugPrint('🤖 OpenRouter (Mistral): Starting analysis...');
+      debugPrint('🤖 OpenRouter ($model): Starting analysis...');
       debugPrint(
           '📝 Input text: "${transcription.substring(0, transcription.length > 100 ? 100 : transcription.length)}..."');
 
       final requestBody = {
-        'model': 'mistralai/mistral-7b-instruct:free',
+        'model': model,
         'messages': [
           {
-            'role': 'system',
-            'content': 'You are an advanced assistant that analyzes transcribed speech and extracts two types of information: notes and tasks.\n\n'
+            'role': 'user',
+            'content':
+                'You are an advanced assistant that analyzes transcribed speech and extracts two types of information: notes and tasks.\n\n'
                 'NOTES: Any general information, thoughts, reflections, or journaling content that is not an explicit task.\n\n'
                 'TASKS: Explicit to-do items or things the user clearly intends to accomplish. Only include as tasks things that are clearly actionable and the user intends to do.\n\n'
                 'Return a JSON with "notes" and "tasks" arrays. If there are no notes or tasks, return an empty array for that category.\n\n'
                 'Example response format:\n'
-                '{"notes": ["I had a great meeting today"], "tasks": ["Call the client tomorrow", "Finish the report"]}'
-          },
-          {
-            'role': 'user',
-            'content':
-                'Analyze this transcribed speech and extract notes and tasks. Be thorough and make sure every important piece of information is captured either as a note or task: "$transcription"'
+                '{"notes": ["I had a great meeting today"], "tasks": ["Call the client tomorrow", "Finish the report"]}\n\n'
+                'Now analyze this transcribed speech and extract notes and tasks. Be thorough and make sure every important piece of information is captured either as a note or task: "$transcription"\n\n'
+                'Respond with only the JSON object, no other text.'
           }
         ],
         'temperature': 0.7,

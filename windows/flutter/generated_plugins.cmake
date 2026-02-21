@@ -8,7 +8,6 @@ list(APPEND FLUTTER_PLUGIN_LIST
   firebase_core
   permission_handler_windows
   record_windows
-  rive_common
   rive_native
 )
 

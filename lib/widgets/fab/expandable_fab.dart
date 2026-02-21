@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import '../../main.dart';
+import 'plus_icon_painter.dart';
 
 class ExpandableFAB extends StatelessWidget {
   final bool isExpanded;

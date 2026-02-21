@@ -440,13 +440,13 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
 }
 
 // Helper function to show the bottom sheet
-void showAddItemBottomSheet({
+Future<void> showAddItemBottomSheet({
   required BuildContext context,
   String initialTab = 'Notes',
   required Function(String content, String type) onAddItem,
   VoidCallback? onReloadEntries,
 }) {
-  showModalBottomSheet(
+  return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.white,
@@ -466,5 +466,7 @@ void showAddItemBottomSheet({
         onReloadEntries: onReloadEntries,
       );
     },
-  );
+  ).then((_) {
+    onReloadEntries?.call();
+  });
 }

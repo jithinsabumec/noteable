@@ -7,6 +7,6 @@ class Config {
   static const String openRouterAPIKey = String.fromEnvironment(
     'OPENROUTER_API_KEY',
     defaultValue:
-        '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',
+        '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',
   );
 }

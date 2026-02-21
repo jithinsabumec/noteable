@@ -15,11 +15,10 @@ import '../widgets/rive_animation_widget.dart';
 import '../widgets/bottom_sheets/add_item_bottom_sheet.dart';
 import '../widgets/timeline/timeline_renderer.dart';
 import '../widgets/guest_recording_counter.dart';
-import 'recording_screen.dart';
 import 'subscription_screen.dart';
 import '../services/item_management_service.dart';
 import '../widgets/dialogs/item_options_dialog.dart';
-import '../test_audio_viz.dart';
+
 
 class MainScreen extends StatefulWidget {
   final bool isGuestMode;
@@ -315,71 +314,7 @@ class _MainScreenState extends State<MainScreen>
 
   // Start recording audio
   void _startRecording() async {
-    // Prepare for seamless transition by setting up states
-    setState(() {
-      _showAnimations = false; // Don't show animations yet
-      _isTranscribing = false;
-      _isUnderstanding = false;
-      _isAnalyzing = false;
-      _transcribedText = ''; // Reset transcribed text before each recording
-    });
-
-    // Cancel any existing timer to avoid state conflicts
-    _animationSequenceTimer?.cancel();
-    _animationSequenceTimer = null;
-
-    debugPrint('🎙️ Starting new recording session');
-
-    // Navigate to the recording page
-    final result = await Navigator.push(
-      context,
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            const RecordingScreen(),
-        transitionDuration: const Duration(milliseconds: 300),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(
-            opacity: animation,
-            child: child,
-          );
-        },
-      ),
-    );
-
-    debugPrint('🎙️ Returned from recording screen with result: $result');
-
-    // Handle result from recording page if needed
-    if (result != null &&
-        result['success'] == true &&
-        result['filePath'] != null) {
-      debugPrint(
-          '🎙️ Got successful recording with file: ${result['filePath']}');
-
-      // When we return from recording, the animation has already started there
-      setState(() {
-        _isTranscribing = true;
-        _isUnderstanding = false;
-        _isAnalyzing = false;
-        _showAnimations = true; // Show animations immediately
-      });
-
-      // Start the animation sequence with a small delay to ensure smooth transition
-      await Future.delayed(const Duration(milliseconds: 50));
-      _startProcessingAnimationSequence("");
-
-      // Start actual transcription in the background
-      await _transcribeAudio(result['filePath']);
-    } else {
-      debugPrint('🎙️ Recording was cancelled or failed');
-      // If recording was cancelled, make sure no animations are showing
-      _animationSequenceTimer?.cancel();
-      setState(() {
-        _showAnimations = false;
-        _isTranscribing = false;
-        _isUnderstanding = false;
-        _isAnalyzing = false;
-      });
-    }
+    debugPrint('🎙️ Legacy recording screen removed; using Rive bottom bar flow');
   }
 
   // Start a timed animation sequence
@@ -907,26 +842,7 @@ class _MainScreenState extends State<MainScreen>
               ),
             ),
 
-          // Add temporary debug button for testing
-          if (true) // Enable for testing
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const TestAudioVisualization(),
-                    ),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('🧪 Test Audio Visualizer'),
-              ),
-            ),
+
         ],
       ),
     );

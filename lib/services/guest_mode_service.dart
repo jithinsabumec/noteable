@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class GuestModeService {
   static const String _guestRecordingCountKey = 'guest_recording_count';
   // Set to a very high number for unlimited testing
-  static const int _maxGuestRecordings = 5;
+  static const int _maxGuestRecordings = 10;
 
   // Singleton pattern
   static final GuestModeService _instance = GuestModeService._internal();
