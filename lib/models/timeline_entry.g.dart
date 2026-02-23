@@ -22,13 +22,15 @@ class TimelineEntryAdapter extends TypeAdapter<TimelineEntry> {
       timestamp: fields[2] as DateTime,
       type: fields[3] as EntryType,
       completed: fields[4] as bool,
+      scheduledDate: fields[5] as DateTime?,
+      scheduledTime: fields[6] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, TimelineEntry obj) {
     writer
-      ..writeByte(5)
+      ..writeByte(7)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -38,7 +40,11 @@ class TimelineEntryAdapter extends TypeAdapter<TimelineEntry> {
       ..writeByte(3)
       ..write(obj.type)
       ..writeByte(4)
-      ..write(obj.completed);
+      ..write(obj.completed)
+      ..writeByte(5)
+      ..write(obj.scheduledDate)
+      ..writeByte(6)
+      ..write(obj.scheduledTime);
   }
 
   @override

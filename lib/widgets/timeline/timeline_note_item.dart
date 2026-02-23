@@ -9,7 +9,9 @@ class TimelineNoteItem extends StatelessWidget {
   final String storageId;
   final Function(String timestamp, int contentListIndex, int orderIndex,
       ItemType itemType, String content, String storageId,
-      {bool? completed}) onShowItemOptions;
+      {bool? completed,
+      DateTime? scheduledDate,
+      String? scheduledTime}) onShowItemOptions;
 
   const TimelineNoteItem({
     super.key,

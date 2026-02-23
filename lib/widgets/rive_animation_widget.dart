@@ -24,6 +24,7 @@ class RiveAnimationWidget extends StatefulWidget {
   final bool isGuestMode;
   final GuestModeService? guestModeService;
   final VoidCallback? onGuestRecordingCountUpdate;
+
   /// Called when guest hits recording limit - show paywall/subscription screen
   final VoidCallback? onShowPaywall;
 
@@ -277,9 +278,8 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
 
     void logViewModel(ViewModelInstance instance, {String parentPath = ''}) {
       for (final property in instance.properties) {
-        final path = parentPath.isEmpty
-            ? property.name
-            : '$parentPath/${property.name}';
+        final path =
+            parentPath.isEmpty ? property.name : '$parentPath/${property.name}';
         final normalized = _normalizeInputName(path);
         if (normalized.contains('bar') || normalized.contains('height')) {
           debugPrint(
@@ -536,8 +536,8 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
   void _configureInputsFromController() {
     if (controller == null) return;
 
-    _isRecordInput =
-        controller!.boolean('isRecord') ?? _findBoolInputWithAliases(['record']);
+    _isRecordInput = controller!.boolean('isRecord') ??
+        _findBoolInputWithAliases(['record']);
     _clickInput =
         controller!.boolean('Click') ?? _findBoolInputWithAliases(['click']);
     _isSubmitInput = controller!.boolean('isSubmit') ??
@@ -571,7 +571,8 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       }
     }
 
-    debugPrint('🎨 Rive: Initializing artboard "${loaded.controller.artboard.name}"');
+    debugPrint(
+        '🎨 Rive: Initializing artboard "${loaded.controller.artboard.name}"');
     debugPrint('🎨 Rive: Found state machine "${controller?.name}"');
 
     if (controller == null) {
@@ -802,7 +803,9 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
 
     // Check guest mode recording limits
     try {
-      if (widget.isGuestMode && widget.guestModeService != null && !_purchaseService.isPremium) {
+      if (widget.isGuestMode &&
+          widget.guestModeService != null &&
+          !_purchaseService.isPremium) {
         final canRecord = await widget.guestModeService!.canRecord();
         if (!canRecord) {
           debugPrint('❌ Guest mode recording limit reached');
@@ -987,11 +990,11 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
   Future<void> _processRecording(String filePath) async {
     try {
       // Step 1: Transcribe audio
-    setState(() {
-      _isTranscribing = true;
-      _isAnalyzing = false;
-    });
-    _isSubmitFlowActive = true;
+      setState(() {
+        _isTranscribing = true;
+        _isAnalyzing = false;
+      });
+      _isSubmitFlowActive = true;
 
       try {
         debugPrint('🎙️ Starting transcription for: $filePath');
@@ -1044,8 +1047,10 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
       debugPrint('🤖 Starting AI analysis with Mistral...');
       debugPrint('📝 Text to analyze: $_transcribedText');
 
-      final result =
-          await _aiAnalysisService.analyzeTranscription(_transcribedText);
+      final result = await _aiAnalysisService.analyzeTranscription(
+        _transcribedText,
+        today: DateTime.now(),
+      );
 
       debugPrint('✅ AI analysis completed');
       debugPrint('📊 Analysis result: $result');
@@ -1120,49 +1125,56 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
     try {
       debugPrint('📅 Adding items to timeline...');
 
-      int notesAdded = 0;
-      int tasksAdded = 0;
+      final notes = <String>[];
+      final tasks = <Map<String, dynamic>>[];
 
-      // Add notes to timeline
-      if (result['notes'] != null && result['notes'].isNotEmpty) {
-        final notes = List<String>.from(result['notes']);
-        debugPrint('📝 Adding ${notes.length} notes: $notes');
-
-        for (final note in notes) {
-          if (note.trim().isNotEmpty) {
-            _itemManagementService.createNoteEntry(
-              noteText: note.trim(),
-              selectedDate: widget.selectedDate,
-              timelineEntriesByDate: widget.timelineEntriesByDate,
-              onStateUpdate: widget.onStateUpdate,
-            );
-            notesAdded++;
-            debugPrint('✅ Added note: ${note.trim()}');
+      if (result['notes'] is List) {
+        for (final note in result['notes'] as List) {
+          final noteText = note?.toString().trim() ?? '';
+          if (noteText.isNotEmpty) {
+            notes.add(noteText);
           }
         }
       }
 
-      // Add tasks to timeline
-      if (result['tasks'] != null && result['tasks'].isNotEmpty) {
-        final tasks = List<String>.from(result['tasks']);
-        debugPrint('✅ Adding ${tasks.length} tasks: $tasks');
-
-        for (final task in tasks) {
-          if (task.trim().isNotEmpty) {
-            _itemManagementService.createTaskEntry(
-              taskText: task.trim(),
-              selectedDate: widget.selectedDate,
-              timelineEntriesByDate: widget.timelineEntriesByDate,
-              onStateUpdate: widget.onStateUpdate,
-            );
-            tasksAdded++;
-            debugPrint('✅ Added task: ${task.trim()}');
+      if (result['tasks'] is List) {
+        for (final item in result['tasks'] as List) {
+          if (item is Map) {
+            final text = (item['text'] ?? item['task'] ?? '').toString().trim();
+            if (text.isNotEmpty) {
+              tasks.add({
+                'text': text,
+                'scheduledDate': item['scheduledDate'],
+                'scheduledTime': item['scheduledTime'],
+              });
+            }
+          } else {
+            final text = item?.toString().trim() ?? '';
+            if (text.isNotEmpty) {
+              tasks.add({
+                'text': text,
+                'scheduledDate': null,
+                'scheduledTime': null,
+              });
+            }
           }
         }
       }
+
+      await _itemManagementService.createItemsFromProcessedAudio(
+        notes: notes,
+        tasks: tasks,
+        selectedDate: widget.selectedDate,
+        timelineEntriesByDate: widget.timelineEntriesByDate,
+        onStateUpdate: widget.onStateUpdate,
+      );
 
       debugPrint(
-          '✅ Successfully added $notesAdded notes and $tasksAdded tasks to timeline');
+          '✅ Successfully added ${notes.length} notes and ${tasks.length} tasks to timeline');
+
+      if (notes.isEmpty && tasks.isEmpty) {
+        debugPrint('⚠️ No items parsed from AI response');
+      }
 
       // Increment guest mode recording count if in guest mode and processing was successful
       if (widget.isGuestMode && widget.guestModeService != null) {
@@ -1282,7 +1294,8 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
 
     // Also validate against the recorder plugin itself.
     final recorderPermission = await _audioRecorder.hasPermission();
-    debugPrint('🎙️ Mic permission status (record plugin): $recorderPermission');
+    debugPrint(
+        '🎙️ Mic permission status (record plugin): $recorderPermission');
     return recorderPermission;
   }
 
