@@ -51,14 +51,10 @@ class TimelineEntry {
 class TaskItem {
   String task;
   bool completed;
-  DateTime? scheduledDate;
-  String? scheduledTime;
 
   TaskItem({
     required this.task,
     this.completed = false,
-    this.scheduledDate,
-    this.scheduledTime,
   });
 }
 

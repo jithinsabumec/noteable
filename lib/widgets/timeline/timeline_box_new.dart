@@ -11,14 +11,7 @@ class TimelineBoxNew extends StatelessWidget {
       String content, bool completed, String storageId) onUpdateItem;
   final Function(String timestamp, int contentListIndex, int orderIndex,
       ItemType itemType, String content, String storageId,
-      {bool? completed,
-      DateTime? scheduledDate,
-      String? scheduledTime}) onShowItemOptions;
-  final Function(String timestamp, int contentListIndex, int orderIndex,
-      ItemType itemType, String content, String storageId,
-      {bool? completed,
-      DateTime? scheduledDate,
-      String? scheduledTime})? onEditItem;
+      {bool? completed}) onShowItemOptions;
 
   const TimelineBoxNew({
     super.key,
@@ -26,7 +19,6 @@ class TimelineBoxNew extends StatelessWidget {
     required this.timestamp,
     required this.onUpdateItem,
     required this.onShowItemOptions,
-    this.onEditItem,
   });
 
   // Time icon implementation using SVG assets
@@ -105,34 +97,6 @@ class TimelineBoxNew extends StatelessWidget {
               onUpdateItem: onUpdateItem,
               onShowItemOptions: onShowItemOptions,
               contentListIndex: itemRef.index,
-              onTagTap: () {
-                if (onEditItem == null) {
-                  onShowItemOptions(
-                    timestamp,
-                    itemRef.index,
-                    orderIndex,
-                    ItemType.task,
-                    task.task,
-                    itemRef.storageId,
-                    completed: task.completed,
-                    scheduledDate: task.scheduledDate,
-                    scheduledTime: task.scheduledTime,
-                  );
-                  return;
-                }
-
-                onEditItem!(
-                  timestamp,
-                  itemRef.index,
-                  orderIndex,
-                  ItemType.task,
-                  task.task,
-                  itemRef.storageId,
-                  completed: task.completed,
-                  scheduledDate: task.scheduledDate,
-                  scheduledTime: task.scheduledTime,
-                );
-              },
             ),
           );
         }

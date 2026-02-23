@@ -12,8 +12,6 @@ class ItemOptionsDialog extends StatelessWidget {
   final String content;
   final String storageId;
   final bool? completed;
-  final DateTime? scheduledDate;
-  final String? scheduledTime;
   final ItemManagementService itemManagementService;
   final DateTime selectedDate;
   final Map<String, List<TimelineEntry>> timelineEntriesByDate;
@@ -28,8 +26,6 @@ class ItemOptionsDialog extends StatelessWidget {
     required this.content,
     required this.storageId,
     this.completed,
-    this.scheduledDate,
-    this.scheduledTime,
     required this.itemManagementService,
     required this.selectedDate,
     required this.timelineEntriesByDate,
@@ -75,8 +71,6 @@ class ItemOptionsDialog extends StatelessWidget {
                         itemType: itemType,
                         content: content,
                         completed: completed,
-                        scheduledDate: scheduledDate,
-                        scheduledTime: scheduledTime,
                         storageId: storageId,
                         itemManagementService: itemManagementService,
                         selectedDate: selectedDate,
@@ -218,8 +212,6 @@ void showItemOptionsDialog({
   required String content,
   required String storageId,
   bool? completed,
-  DateTime? scheduledDate,
-  String? scheduledTime,
   required ItemManagementService itemManagementService,
   required DateTime selectedDate,
   required Map<String, List<TimelineEntry>> timelineEntriesByDate,
@@ -241,8 +233,6 @@ void showItemOptionsDialog({
         content: content,
         storageId: storageId,
         completed: completed,
-        scheduledDate: scheduledDate,
-        scheduledTime: scheduledTime,
         itemManagementService: itemManagementService,
         selectedDate: selectedDate,
         timelineEntriesByDate: timelineEntriesByDate,

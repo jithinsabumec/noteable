@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/timeline_models.dart';
 import '../../services/item_management_service.dart';
-import '../../utils/date_formatter.dart';
 
 class EditItemDialog extends StatefulWidget {
   final String timestamp;
@@ -11,8 +10,6 @@ class EditItemDialog extends StatefulWidget {
   final String content;
   final String storageId;
   final bool? completed;
-  final DateTime? scheduledDate;
-  final String? scheduledTime;
   final ItemManagementService itemManagementService;
   final DateTime selectedDate;
   final Map<String, List<TimelineEntry>> timelineEntriesByDate;
@@ -27,8 +24,6 @@ class EditItemDialog extends StatefulWidget {
     required this.content,
     required this.storageId,
     this.completed,
-    this.scheduledDate,
-    this.scheduledTime,
     required this.itemManagementService,
     required this.selectedDate,
     required this.timelineEntriesByDate,
@@ -44,8 +39,6 @@ class _EditItemDialogState extends State<EditItemDialog> {
   late List<FocusNode> focusNodes;
   late String selectedType;
   late bool isTaskCompleted;
-  DateTime? selectedScheduledDate;
-  String? selectedScheduledTime;
 
   @override
   void initState() {
@@ -60,12 +53,6 @@ class _EditItemDialogState extends State<EditItemDialog> {
 
     // Initialize completed status for tasks
     isTaskCompleted = widget.completed ?? false;
-    selectedScheduledDate = widget.scheduledDate == null
-        ? null
-        : DateFormatter.startOfDay(widget.scheduledDate!);
-    selectedScheduledTime = DateFormatter.normalizeScheduledTime(
-      widget.scheduledTime,
-    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (focusNodes.isNotEmpty) {
@@ -166,107 +153,6 @@ class _EditItemDialogState extends State<EditItemDialog> {
               ),
             ),
 
-            if (selectedType == 'Tasks') ...[
-              const SizedBox(height: 16),
-              const Text(
-                'Schedule',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  fontFamily: 'Geist',
-                  color: Color(0xFF2D2D2D),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _pickScheduledDate,
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        side: BorderSide(color: Colors.grey.shade300),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        selectedScheduledDate == null
-                            ? 'No date'
-                            : DateFormatter.formatShortMonthDay(
-                                selectedScheduledDate!,
-                              ),
-                        style: const TextStyle(
-                          fontFamily: 'Geist',
-                          fontWeight: FontWeight.w500,
-                          color: Color(0xFF1F1F1F),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        selectedScheduledDate = null;
-                      });
-                    },
-                    child: const Text(
-                      'Clear',
-                      style: TextStyle(
-                        fontFamily: 'Geist',
-                        color: Color(0xFF5D5D5D),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _pickScheduledTime,
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        side: BorderSide(color: Colors.grey.shade300),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        selectedScheduledTime == null
-                            ? 'No time'
-                            : DateFormatter.formatScheduledTimeLabel(
-                                selectedScheduledTime,
-                              ),
-                        style: const TextStyle(
-                          fontFamily: 'Geist',
-                          fontWeight: FontWeight.w500,
-                          color: Color(0xFF1F1F1F),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        selectedScheduledTime = null;
-                      });
-                    },
-                    child: const Text(
-                      'Clear',
-                      style: TextStyle(
-                        fontFamily: 'Geist',
-                        color: Color(0xFF5D5D5D),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-
             const SizedBox(height: 32),
 
             // Bottom Action Buttons
@@ -295,10 +181,10 @@ class _EditItemDialogState extends State<EditItemDialog> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () async {
+                    onPressed: () {
                       final newContent = textControllers.first.text;
                       if (newContent.isNotEmpty) {
-                        await widget.itemManagementService.updateItem(
+                        widget.itemManagementService.updateItem(
                           timestamp: widget.timestamp,
                           orderIndexInItemOrder: widget.orderIndex,
                           newItemType: widget.itemType,
@@ -306,18 +192,10 @@ class _EditItemDialogState extends State<EditItemDialog> {
                           newCompleted: isTaskCompleted,
                           originalItemType: widget.itemType,
                           storageId: widget.storageId,
-                          newScheduledDate: selectedType == 'Tasks'
-                              ? selectedScheduledDate
-                              : null,
-                          newScheduledTime: selectedType == 'Tasks'
-                              ? selectedScheduledTime
-                              : null,
-                          applyScheduleUpdates: selectedType == 'Tasks',
                           selectedDate: widget.selectedDate,
                           timelineEntriesByDate: widget.timelineEntriesByDate,
                           onStateUpdate: widget.onStateUpdate,
                         );
-                        if (!context.mounted) return;
                         Navigator.pop(context);
                       }
                     },
@@ -346,61 +224,6 @@ class _EditItemDialogState extends State<EditItemDialog> {
       ),
     );
   }
-
-  Future<void> _pickScheduledDate() async {
-    final initialDate = selectedScheduledDate ?? DateTime.now();
-    final pickedDate = await showDatePicker(
-      context: context,
-      initialDate: initialDate,
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
-    );
-
-    if (pickedDate == null) return;
-
-    setState(() {
-      selectedScheduledDate = DateFormatter.startOfDay(pickedDate);
-    });
-  }
-
-  Future<void> _pickScheduledTime() async {
-    final initialTime =
-        _timeOfDayFromStorage(selectedScheduledTime) ?? TimeOfDay.now();
-    final pickedTime = await showTimePicker(
-      context: context,
-      initialTime: initialTime,
-    );
-
-    if (pickedTime == null) return;
-
-    setState(() {
-      selectedScheduledTime = _toStorageTime(pickedTime);
-    });
-  }
-
-  TimeOfDay? _timeOfDayFromStorage(String? value) {
-    final normalized = DateFormatter.normalizeScheduledTime(value);
-    if (normalized == null) {
-      return null;
-    }
-
-    final parts = normalized.split(':');
-    if (parts.length != 2) {
-      return null;
-    }
-
-    final hour = int.tryParse(parts[0]);
-    final minute = int.tryParse(parts[1]);
-    if (hour == null || minute == null) {
-      return null;
-    }
-
-    return TimeOfDay(hour: hour, minute: minute);
-  }
-
-  String _toStorageTime(TimeOfDay time) {
-    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-  }
 }
 
 // Helper function to show the edit item dialog
@@ -413,8 +236,6 @@ void showEditItemDialog({
   required String content,
   required String storageId,
   bool? completed,
-  DateTime? scheduledDate,
-  String? scheduledTime,
   required ItemManagementService itemManagementService,
   required DateTime selectedDate,
   required Map<String, List<TimelineEntry>> timelineEntriesByDate,
@@ -436,8 +257,6 @@ void showEditItemDialog({
         content: content,
         storageId: storageId,
         completed: completed,
-        scheduledDate: scheduledDate,
-        scheduledTime: scheduledTime,
         itemManagementService: itemManagementService,
         selectedDate: selectedDate,
         timelineEntriesByDate: timelineEntriesByDate,

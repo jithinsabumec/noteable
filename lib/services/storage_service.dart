@@ -26,138 +26,25 @@ class StorageService {
         .collection(_entriesCollection);
   }
 
-  DateTime _startOfDay(DateTime value) =>
-      DateTime(value.year, value.month, value.day);
-
-  DateTime? _parseTimestampValue(dynamic value) {
-    if (value == null) return null;
-    if (value is Timestamp) return value.toDate();
-    if (value is DateTime) return value;
-    if (value is String) return DateTime.tryParse(value.trim());
-    return null;
-  }
-
-  DateTime? _parseDateValue(dynamic value) {
-    if (value == null) return null;
-    if (value is Timestamp) {
-      final date = value.toDate();
-      return _startOfDay(date);
-    }
-    if (value is DateTime) {
-      return _startOfDay(value);
-    }
-    if (value is String) {
-      final parsed = DateTime.tryParse(value.trim());
-      if (parsed != null) {
-        return _startOfDay(parsed);
-      }
-    }
-    return null;
-  }
-
-  String? _normalizeScheduledTime(dynamic rawValue) {
-    if (rawValue == null) return null;
-
-    final value = rawValue.toString().trim();
-    if (value.isEmpty) return null;
-
-    final hhmmMatch = RegExp(r'^([01]?\d|2[0-3]):([0-5]\d)$').firstMatch(value);
-    if (hhmmMatch != null) {
-      final hour = int.parse(hhmmMatch.group(1)!);
-      final minute = int.parse(hhmmMatch.group(2)!);
-      return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
-    }
-
-    final amPmMatch =
-        RegExp(r'^(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*([AaPp][Mm])$')
-            .firstMatch(value);
-    if (amPmMatch != null) {
-      int hour = int.parse(amPmMatch.group(1)!);
-      final minute = int.parse(amPmMatch.group(2) ?? '00');
-      final period = amPmMatch.group(3)!.toUpperCase();
-
-      if (period == 'PM' && hour < 12) {
-        hour += 12;
-      } else if (period == 'AM' && hour == 12) {
-        hour = 0;
-      }
-
-      return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
-    }
-
-    final lower = value.toLowerCase();
-    if (lower.contains('morning')) return '09:00';
-    if (lower.contains('afternoon')) return '15:00';
-    if (lower.contains('evening')) return '19:00';
-    if (lower.contains('night')) return '21:00';
-
-    return null;
-  }
-
-  DateTime _effectiveTaskDate(TimelineEntry entry) {
-    return _startOfDay(entry.scheduledDate ?? entry.timestamp);
-  }
-
-  bool _isTaskWithinRange(TimelineEntry entry, DateTime? from, DateTime? to) {
-    final taskDate = _effectiveTaskDate(entry);
-    if (from != null && taskDate.isBefore(from)) {
-      return false;
-    }
-    if (to != null && taskDate.isAfter(to)) {
-      return false;
-    }
-    return true;
-  }
-
-  int? _scheduledTimeToMinutes(String? value) {
-    final normalized = _normalizeScheduledTime(value);
-    if (normalized == null) return null;
-
-    final parts = normalized.split(':');
-    if (parts.length != 2) return null;
-    final hour = int.tryParse(parts[0]);
-    final minute = int.tryParse(parts[1]);
-    if (hour == null || minute == null) return null;
-
-    return (hour * 60) + minute;
-  }
-
-  int _compareTasks(TimelineEntry a, TimelineEntry b) {
-    final dateCompare = _effectiveTaskDate(a).compareTo(_effectiveTaskDate(b));
-    if (dateCompare != 0) return dateCompare;
-
-    final aMinutes = _scheduledTimeToMinutes(a.scheduledTime) ?? 9999;
-    final bMinutes = _scheduledTimeToMinutes(b.scheduledTime) ?? 9999;
-    if (aMinutes != bMinutes) return aMinutes.compareTo(bMinutes);
-
-    return a.timestamp.compareTo(b.timestamp);
-  }
-
   Map<String, dynamic> _toMap(TimelineEntry entry) {
     return {
       'content': entry.content,
       'timestamp': Timestamp.fromDate(entry.timestamp),
       'type': entry.type.name,
       'completed': entry.completed,
-      'scheduledDate': entry.scheduledDate == null
-          ? null
-          : Timestamp.fromDate(_startOfDay(entry.scheduledDate!)),
-      'scheduledTime': _normalizeScheduledTime(entry.scheduledTime),
     };
   }
 
   TimelineEntry _fromMap(String id, Map<String, dynamic> data) {
     final String type = (data['type'] as String?) ?? 'note';
-    final timestamp = _parseTimestampValue(data['timestamp']) ?? DateTime.now();
+    final Timestamp? ts = data['timestamp'] as Timestamp?;
 
     return TimelineEntry(
       id: id,
       content: (data['content'] as String?) ?? '',
-      timestamp: timestamp,
+      timestamp: ts?.toDate() ?? DateTime.now(),
       type: type == EntryType.task.name ? EntryType.task : EntryType.note,
       completed: (data['completed'] as bool?) ?? false,
-      scheduledDate: _parseDateValue(data['scheduledDate']),
-      scheduledTime: _normalizeScheduledTime(data['scheduledTime']),
     );
   }
 
@@ -241,36 +128,6 @@ class StorageService {
   Future<List<TimelineEntry>> getTasksForDate(DateTime date) async {
     final entries = await getEntriesForDate(date);
     return entries.where((entry) => entry.type == EntryType.task).toList();
-  }
-
-  Future<List<TimelineEntry>> getTasksInDateRange(
-      DateTime? from, DateTime? to) async {
-    final fromDate = from == null ? null : _startOfDay(from);
-    final toDate = to == null ? null : _startOfDay(to);
-    final userId = _userId;
-
-    if (userId == null) {
-      final tasks = _guestEntries.values
-          .where((entry) => entry.type == EntryType.task)
-          .where((entry) => _isTaskWithinRange(entry, fromDate, toDate))
-          .toList()
-        ..sort(_compareTasks);
-      return tasks;
-    }
-
-    // For larger datasets, create an index on `type` + `timestamp`.
-    final query = await _entriesRef(userId)
-        .where('type', isEqualTo: EntryType.task.name)
-        .orderBy('timestamp')
-        .get();
-
-    final tasks = query.docs
-        .map((doc) => _fromMap(doc.id, doc.data()))
-        .where((entry) => _isTaskWithinRange(entry, fromDate, toDate))
-        .toList()
-      ..sort(_compareTasks);
-
-    return tasks;
   }
 
   // Generate a unique ID

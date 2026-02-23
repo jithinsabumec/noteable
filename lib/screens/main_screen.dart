@@ -16,11 +16,9 @@ import '../widgets/bottom_sheets/add_item_bottom_sheet.dart';
 import '../widgets/timeline/timeline_renderer.dart';
 import '../widgets/guest_recording_counter.dart';
 import 'subscription_screen.dart';
-import 'tasks_screen.dart';
 import '../services/item_management_service.dart';
 import '../services/purchase_service.dart';
 import '../widgets/dialogs/item_options_dialog.dart';
-import '../widgets/dialogs/edit_item_dialog.dart';
 
 class MainScreen extends StatefulWidget {
   final bool isGuestMode;
@@ -158,8 +156,6 @@ class _MainScreenState extends State<MainScreen>
           uiEntry.tasks.add(TaskItem(
             task: sEntry.content,
             completed: sEntry.completed,
-            scheduledDate: sEntry.scheduledDate,
-            scheduledTime: sEntry.scheduledTime,
           ));
           uiEntry.itemOrder.add(TimelineItemRef(
             type: ItemType.task,
@@ -313,7 +309,7 @@ class _MainScreenState extends State<MainScreen>
   // Wrapper for _showItemOptions to match TimelineRenderer signature
   void _showItemOptionsWrapper(String timestamp, int contentListIndex,
       int orderIndex, ItemType itemType, String content, String storageId,
-      {bool? completed, DateTime? scheduledDate, String? scheduledTime}) {
+      {bool? completed}) {
     showItemOptionsDialog(
       context: context,
       timestamp: timestamp,
@@ -323,29 +319,6 @@ class _MainScreenState extends State<MainScreen>
       content: content,
       storageId: storageId,
       completed: completed,
-      scheduledDate: scheduledDate,
-      scheduledTime: scheduledTime,
-      itemManagementService: _itemManagementService,
-      selectedDate: _selectedDate,
-      timelineEntriesByDate: _timelineEntriesByDate,
-      onStateUpdate: () => setState(() {}),
-    );
-  }
-
-  void _showEditItemDialogWrapper(String timestamp, int contentListIndex,
-      int orderIndex, ItemType itemType, String content, String storageId,
-      {bool? completed, DateTime? scheduledDate, String? scheduledTime}) {
-    showEditItemDialog(
-      context: context,
-      timestamp: timestamp,
-      contentListIndex: contentListIndex,
-      orderIndex: orderIndex,
-      itemType: itemType,
-      content: content,
-      storageId: storageId,
-      completed: completed,
-      scheduledDate: scheduledDate,
-      scheduledTime: scheduledTime,
       itemManagementService: _itemManagementService,
       selectedDate: _selectedDate,
       timelineEntriesByDate: _timelineEntriesByDate,
@@ -486,15 +459,12 @@ class _MainScreenState extends State<MainScreen>
 
       final String finalText = textToProcess;
 
-      final result = await _aiAnalysisService.analyzeTranscription(
-        finalText,
-        today: DateTime.now(),
-      );
+      final result = await _aiAnalysisService.analyzeTranscription(finalText);
       debugPrint('AI Analysis result: $result');
 
       // Extract notes and tasks from the LLM result
       List<String> notes = [];
-      List<Map<String, dynamic>> tasks = [];
+      List<TaskItem> tasks = [];
 
       if (result['notes'] != null && result['notes'].isNotEmpty) {
         notes = List<String>.from(result['notes']);
@@ -502,24 +472,15 @@ class _MainScreenState extends State<MainScreen>
       }
 
       if (result['tasks'] != null && result['tasks'].isNotEmpty) {
-        tasks = List<Map<String, dynamic>>.from(
-          (result['tasks'] as List).map((task) {
-            if (task is Map) {
-              return {
-                'text': (task['text'] ?? task['task'] ?? '').toString(),
-                'scheduledDate': task['scheduledDate'],
-                'scheduledTime': task['scheduledTime'],
-              };
-            }
-            return {
-              'text': task.toString(),
-              'scheduledDate': null,
-              'scheduledTime': null,
-            };
-          }),
-        );
+        final taskStrings = List<String>.from(result['tasks']);
+        tasks = taskStrings
+            .map((taskText) => TaskItem(
+                  task: taskText,
+                  completed: false,
+                ))
+            .toList();
         debugPrint(
-            'Extracted ${tasks.length} tasks: ${tasks.map((t) => t['text']).toList()}');
+            'Extracted ${tasks.length} tasks: ${tasks.map((t) => t.task).toList()}');
       }
 
       // Use the item management service to create items from processed audio
@@ -764,53 +725,6 @@ class _MainScreenState extends State<MainScreen>
                                       const SizedBox(width: 8),
                                     ],
 
-                                    GestureDetector(
-                                      onTap: () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (context) =>
-                                                const TasksScreen(),
-                                          ),
-                                        ).then((_) =>
-                                            _loadEntriesForSelectedDate());
-                                      },
-                                      child: Container(
-                                        width: 31,
-                                        height: 31,
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 1, vertical: 2),
-                                        clipBehavior: Clip.antiAlias,
-                                        decoration: ShapeDecoration(
-                                          color: const Color(0xFFE6EFFF),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(16),
-                                          ),
-                                        ),
-                                        child: Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.center,
-                                          children: [
-                                            SvgPicture.asset(
-                                              'assets/icons/tasks.svg',
-                                              width: 13,
-                                              height: 13,
-                                              colorFilter:
-                                                  const ColorFilter.mode(
-                                                Color(0xFF001778),
-                                                BlendMode.srcIn,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-
                                     // Signout button
                                     GestureDetector(
                                       onTap: () {
@@ -903,7 +817,6 @@ class _MainScreenState extends State<MainScreen>
                               selectedDate: _selectedDate,
                               onUpdateItem: _updateItemWrapper,
                               onShowItemOptions: _showItemOptionsWrapper,
-                              onEditItem: _showEditItemDialogWrapper,
                             ),
                           ),
                         ],
