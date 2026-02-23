@@ -7,7 +7,7 @@ class ItemManagementService {
   final StorageService _storageService = StorageService();
 
   // Update an item (note or task) in both storage and UI
-  void updateItem({
+  Future<void> updateItem({
     required String timestamp,
     required int orderIndexInItemOrder,
     required ItemType newItemType,
@@ -18,32 +18,19 @@ class ItemManagementService {
     required DateTime selectedDate,
     required Map<String, List<TimelineEntry>> timelineEntriesByDate,
     required Function() onStateUpdate,
-  }) {
-    // Update in storage - find the entry by ID from current date entries
-    final currentEntries = _storageService.getEntriesForDate(selectedDate);
-    final storageEntry = currentEntries.firstWhere(
-      (entry) => entry.id == storageId,
-      orElse: () => models.TimelineEntry(
-        id: storageId,
-        content: newContent,
-        timestamp: DateTime.now(),
-        type: newItemType == ItemType.note
-            ? models.EntryType.note
-            : models.EntryType.task,
-        completed: newCompleted,
-      ),
-    );
+  }) async {
+    final existingEntry = await _storageService.getEntryById(storageId);
 
     final updatedEntry = models.TimelineEntry(
-      id: storageEntry.id,
+      id: storageId,
       content: newContent,
-      timestamp: storageEntry.timestamp,
+      timestamp: existingEntry?.timestamp ?? DateTime.now(),
       type: newItemType == ItemType.note
           ? models.EntryType.note
           : models.EntryType.task,
       completed: newCompleted,
     );
-    _storageService.updateEntry(updatedEntry);
+    await _storageService.updateEntry(updatedEntry);
 
     // Update in UI
     final uiEntry = timelineEntriesByDate[timestamp]?.first;
@@ -68,12 +55,12 @@ class ItemManagementService {
   }
 
   // Create a new note entry with the current timestamp
-  void createNoteEntry({
+  Future<void> createNoteEntry({
     required String noteText,
     required DateTime selectedDate,
     required Map<String, List<TimelineEntry>> timelineEntriesByDate,
     required Function() onStateUpdate,
-  }) {
+  }) async {
     debugPrint('📝 ItemManagementService: Creating note entry...');
     debugPrint('   Note text: "$noteText"');
     debugPrint('   Selected date: $selectedDate');
@@ -104,7 +91,7 @@ class ItemManagementService {
 
     try {
       // Save to storage
-      _storageService.saveEntry(storageEntry);
+      await _storageService.saveEntry(storageEntry);
       debugPrint('✅ Successfully saved note to storage');
     } catch (e) {
       debugPrint('❌ Failed to save note to storage: $e');
@@ -158,12 +145,12 @@ class ItemManagementService {
   }
 
   // Create a new task entry with the current timestamp
-  void createTaskEntry({
+  Future<void> createTaskEntry({
     required String taskText,
     required DateTime selectedDate,
     required Map<String, List<TimelineEntry>> timelineEntriesByDate,
     required Function() onStateUpdate,
-  }) {
+  }) async {
     debugPrint('✅ ItemManagementService: Creating task entry...');
     debugPrint('   Task text: "$taskText"');
     debugPrint('   Selected date: $selectedDate');
@@ -194,7 +181,7 @@ class ItemManagementService {
 
     try {
       // Save to storage
-      _storageService.saveEntry(storageEntry);
+      await _storageService.saveEntry(storageEntry);
       debugPrint('✅ Successfully saved task to storage');
     } catch (e) {
       debugPrint('❌ Failed to save task to storage: $e');
@@ -256,16 +243,16 @@ class ItemManagementService {
   }
 
   // Delete a note or task
-  void deleteItem({
+  Future<void> deleteItem({
     required String timestamp,
     required int orderIndexInItemOrder,
     required ItemType itemType,
     required String storageId,
     required Map<String, List<TimelineEntry>> timelineEntriesByDate,
     required Function() onStateUpdate,
-  }) {
+  }) async {
     // Delete from persistent storage first
-    _storageService.deleteEntry(storageId);
+    await _storageService.deleteEntry(storageId);
 
     final uiEntry = timelineEntriesByDate[timestamp]?.first;
     if (uiEntry == null) {
@@ -318,13 +305,13 @@ class ItemManagementService {
   }
 
   // Create multiple items from processed audio (notes and tasks)
-  void createItemsFromProcessedAudio({
+  Future<void> createItemsFromProcessedAudio({
     required List<String> notes,
     required List<TaskItem> tasks,
     required DateTime selectedDate,
     required Map<String, List<TimelineEntry>> timelineEntriesByDate,
     required Function() onStateUpdate,
-  }) {
+  }) async {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
@@ -340,6 +327,7 @@ class ItemManagementService {
     final isDaytime = now.hour >= 6 && now.hour < 18;
 
     // Save each note and task to storage
+    final savedNoteEntries = <models.TimelineEntry>[];
     for (final note in notes) {
       final storageEntry = models.TimelineEntry(
         id: _storageService.generateId(),
@@ -348,9 +336,10 @@ class ItemManagementService {
         type: models.EntryType.note,
         completed: false,
       );
-      _storageService.saveEntry(storageEntry);
+      savedNoteEntries.add(storageEntry);
     }
 
+    final savedTaskEntries = <models.TimelineEntry>[];
     for (final task in tasks) {
       final storageEntry = models.TimelineEntry(
         id: _storageService.generateId(),
@@ -359,7 +348,14 @@ class ItemManagementService {
         type: models.EntryType.task,
         completed: task.completed,
       );
-      _storageService.saveEntry(storageEntry);
+      savedTaskEntries.add(storageEntry);
+    }
+
+    for (final entry in savedNoteEntries) {
+      await _storageService.saveEntry(entry);
+    }
+    for (final entry in savedTaskEntries) {
+      await _storageService.saveEntry(entry);
     }
 
     // Update UI if we're viewing today
@@ -370,23 +366,25 @@ class ItemManagementService {
 
       if (existingUiEntry != null) {
         // Add to existing entry for this timestamp
-        for (final note in notes) {
+        for (int i = 0; i < notes.length; i++) {
+          final note = notes[i];
           final newNoteIndex = existingUiEntry.notes.length;
           existingUiEntry.notes.add(note);
           existingUiEntry.itemOrder.add(TimelineItemRef(
             type: ItemType.note,
             index: newNoteIndex,
-            storageId: _storageService.generateId(),
+            storageId: savedNoteEntries[i].id,
           ));
         }
 
-        for (final task in tasks) {
+        for (int i = 0; i < tasks.length; i++) {
+          final task = tasks[i];
           final newTaskIndex = existingUiEntry.tasks.length;
           existingUiEntry.tasks.add(task);
           existingUiEntry.itemOrder.add(TimelineItemRef(
             type: ItemType.task,
             index: newTaskIndex,
-            storageId: _storageService.generateId(),
+            storageId: savedTaskEntries[i].id,
           ));
         }
       } else {
@@ -397,7 +395,7 @@ class ItemManagementService {
           itemOrder.add(TimelineItemRef(
             type: ItemType.note,
             index: i,
-            storageId: _storageService.generateId(),
+            storageId: savedNoteEntries[i].id,
           ));
         }
 
@@ -405,7 +403,7 @@ class ItemManagementService {
           itemOrder.add(TimelineItemRef(
             type: ItemType.task,
             index: i,
-            storageId: _storageService.generateId(),
+            storageId: savedTaskEntries[i].id,
           ));
         }
 

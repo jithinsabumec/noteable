@@ -1271,12 +1271,19 @@ class _RiveAnimationWidgetState extends State<RiveAnimationWidget> {
 
   Future<bool> _checkPermissions() async {
     final status = await Permission.microphone.status;
-    if (status.isGranted) {
-      return true;
+    debugPrint('🎙️ Mic permission status (permission_handler): $status');
+    if (!status.isGranted) {
+      final result = await Permission.microphone.request();
+      debugPrint('🎙️ Mic permission request result: $result');
+      if (!result.isGranted) {
+        return false;
+      }
     }
 
-    final result = await Permission.microphone.request();
-    return result.isGranted;
+    // Also validate against the recorder plugin itself.
+    final recorderPermission = await _audioRecorder.hasPermission();
+    debugPrint('🎙️ Mic permission status (record plugin): $recorderPermission');
+    return recorderPermission;
   }
 
   void _initAudioPlayer() {

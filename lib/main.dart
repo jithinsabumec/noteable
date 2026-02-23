@@ -34,7 +34,7 @@ Future<void> main() async {
 
 Future<void> _requestStoragePermissions() async {
   try {
-    if (io.Platform.isAndroid || io.Platform.isIOS) {
+    if (io.Platform.isAndroid) {
       final storageStatus = await Permission.storage.request();
       if (!storageStatus.isGranted) {
         debugPrint('Storage permission not granted: $storageStatus');

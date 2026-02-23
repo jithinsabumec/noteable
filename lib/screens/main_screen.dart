@@ -20,7 +20,6 @@ import '../services/item_management_service.dart';
 import '../services/purchase_service.dart';
 import '../widgets/dialogs/item_options_dialog.dart';
 
-
 class MainScreen extends StatefulWidget {
   final bool isGuestMode;
   final VoidCallback onExitGuestMode;
@@ -116,7 +115,7 @@ class _MainScreenState extends State<MainScreen>
   // Load entries for the selected date
   Future<void> _loadEntriesForSelectedDate() async {
     final List<models.TimelineEntry> sEntries =
-        _storageService.getEntriesForDate(_selectedDate);
+        await _storageService.getEntriesForDate(_selectedDate);
     // Sort entries by timestamp to ensure consistent order if multiple items share the same UI timestamp string
     sEntries.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
@@ -267,16 +266,16 @@ class _MainScreenState extends State<MainScreen>
   }
 
   // Handle adding an item from the bottom sheet
-  void _handleAddItem(String content, String type) {
+  Future<void> _handleAddItem(String content, String type) async {
     if (type == 'Notes') {
-      _itemManagementService.createNoteEntry(
+      await _itemManagementService.createNoteEntry(
         noteText: content,
         selectedDate: _selectedDate,
         timelineEntriesByDate: _timelineEntriesByDate,
         onStateUpdate: () => setState(() {}),
       );
     } else {
-      _itemManagementService.createTaskEntry(
+      await _itemManagementService.createTaskEntry(
         taskText: content,
         selectedDate: _selectedDate,
         timelineEntriesByDate: _timelineEntriesByDate,
@@ -286,9 +285,14 @@ class _MainScreenState extends State<MainScreen>
   }
 
   // Wrapper for _updateItem to match TimelineRenderer signature
-  void _updateItemWrapper(String timestamp, int orderIndex, ItemType itemType,
-      String content, bool completed, String storageId) {
-    _itemManagementService.updateItem(
+  Future<void> _updateItemWrapper(
+      String timestamp,
+      int orderIndex,
+      ItemType itemType,
+      String content,
+      bool completed,
+      String storageId) async {
+    await _itemManagementService.updateItem(
       timestamp: timestamp,
       orderIndexInItemOrder: orderIndex,
       newItemType: itemType,
@@ -324,7 +328,8 @@ class _MainScreenState extends State<MainScreen>
 
   // Start recording audio
   void _startRecording() async {
-    debugPrint('🎙️ Legacy recording screen removed; using Rive bottom bar flow');
+    debugPrint(
+        '🎙️ Legacy recording screen removed; using Rive bottom bar flow');
   }
 
   // Start a timed animation sequence
@@ -479,7 +484,7 @@ class _MainScreenState extends State<MainScreen>
       }
 
       // Use the item management service to create items from processed audio
-      _itemManagementService.createItemsFromProcessedAudio(
+      await _itemManagementService.createItemsFromProcessedAudio(
         notes: notes,
         tasks: tasks,
         selectedDate: _selectedDate,
@@ -503,7 +508,7 @@ class _MainScreenState extends State<MainScreen>
       // Create a note with the transcribed text as fallback
       if (text.isNotEmpty && !text.contains('Error transcribing audio')) {
         debugPrint('Creating fallback note with transcribed text');
-        _itemManagementService.createNoteEntry(
+        await _itemManagementService.createNoteEntry(
           noteText: 'Transcribed: $text',
           selectedDate: _selectedDate,
           timelineEntriesByDate: _timelineEntriesByDate,
@@ -645,7 +650,8 @@ class _MainScreenState extends State<MainScreen>
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     // Upgrade button for guest mode only
-                                    if (widget.isGuestMode && !_purchaseService.isPremium) ...[
+                                    if (widget.isGuestMode &&
+                                        !_purchaseService.isPremium) ...[
                                       GestureDetector(
                                         onTap: () {
                                           Navigator.push(
@@ -862,8 +868,6 @@ class _MainScreenState extends State<MainScreen>
                 ),
               ),
             ),
-
-
         ],
       ),
     );

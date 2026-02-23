@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 class AddItemBottomSheet extends StatefulWidget {
   final String initialTab;
-  final Function(String content, String type) onAddItem;
+  final FutureOr<void> Function(String content, String type) onAddItem;
   final VoidCallback? onReloadEntries;
 
   const AddItemBottomSheet({
@@ -29,10 +30,15 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
     textControllers = [TextEditingController()];
     focusNodes = [FocusNode()];
 
+    // Delay focus until the modal open animation completes to avoid
+    // keyboard + inset relayout during transition.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (focusNodes.isNotEmpty) {
+      Future.delayed(const Duration(milliseconds: 280), () {
+        if (!mounted || focusNodes.isEmpty) {
+          return;
+        }
         focusNodes.first.requestFocus();
-      }
+      });
     });
   }
 
@@ -60,13 +66,17 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
     });
   }
 
-  void _handleSubmit() {
+  Future<void> _handleSubmit() async {
     bool anEntryWasAdded = false;
     for (var controller in textControllers) {
       if (controller.text.isNotEmpty) {
-        widget.onAddItem(controller.text, selectedType);
+        await widget.onAddItem(controller.text, selectedType);
         anEntryWasAdded = true;
       }
+    }
+
+    if (!mounted) {
+      return;
     }
 
     if (anEntryWasAdded) {
@@ -164,8 +174,6 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                                 setState(() {
                                   selectedType = 'Notes';
                                 });
-                                // Reload entries when switching tabs to ensure fresh data
-                                widget.onReloadEntries?.call();
                               },
                               child: Container(
                                 padding:
@@ -212,8 +220,6 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
                                 setState(() {
                                   selectedType = 'Tasks';
                                 });
-                                // Reload entries when switching tabs to ensure fresh data
-                                widget.onReloadEntries?.call();
                               },
                               child: Container(
                                 padding:
@@ -443,7 +449,7 @@ class _AddItemBottomSheetState extends State<AddItemBottomSheet> {
 Future<void> showAddItemBottomSheet({
   required BuildContext context,
   String initialTab = 'Notes',
-  required Function(String content, String type) onAddItem,
+  required FutureOr<void> Function(String content, String type) onAddItem,
   VoidCallback? onReloadEntries,
 }) {
   return showModalBottomSheet<void>(

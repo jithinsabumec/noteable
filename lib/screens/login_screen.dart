@@ -200,17 +200,23 @@ class _LoginScreenState extends State<LoginScreen>
                       SizedBox(
                         height: MediaQuery.of(context).size.height * 0.37,
                       ),
-
-                      // Welcome text section
                       Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 32.0,
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              // Welcome text
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            return SingleChildScrollView(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  minHeight: constraints.maxHeight - 12,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 32.0,
+                                  ),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      // Welcome text
                               const Text(
                                 'Welcome to',
                                 style: TextStyle(
@@ -364,9 +370,13 @@ class _LoginScreenState extends State<LoginScreen>
                                 ),
                               ],
 
-                              const SizedBox(height: 40),
-                            ],
-                          ),
+                                      const SizedBox(height: 40),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ],
