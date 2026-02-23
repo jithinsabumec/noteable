@@ -10,7 +10,14 @@ class TimelineRenderer extends StatelessWidget {
       String content, bool completed, String storageId) onUpdateItem;
   final Function(String timestamp, int contentListIndex, int orderIndex,
       ItemType itemType, String content, String storageId,
-      {bool? completed}) onShowItemOptions;
+      {bool? completed,
+      DateTime? scheduledDate,
+      String? scheduledTime}) onShowItemOptions;
+  final Function(String timestamp, int contentListIndex, int orderIndex,
+      ItemType itemType, String content, String storageId,
+      {bool? completed,
+      DateTime? scheduledDate,
+      String? scheduledTime})? onEditItem;
 
   const TimelineRenderer({
     super.key,
@@ -18,6 +25,7 @@ class TimelineRenderer extends StatelessWidget {
     required this.selectedDate,
     required this.onUpdateItem,
     required this.onShowItemOptions,
+    this.onEditItem,
   });
 
   // Compare timestamps for sorting
@@ -65,6 +73,7 @@ class TimelineRenderer extends StatelessWidget {
           timestamp: timestamp,
           onUpdateItem: onUpdateItem,
           onShowItemOptions: onShowItemOptions,
+          onEditItem: onEditItem,
         );
       }).toList(),
     );

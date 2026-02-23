@@ -2,9 +2,60 @@ import 'package:noteable/services/storage_service.dart';
 import 'package:noteable/models/timeline_entry.dart' as models;
 import '../models/timeline_models.dart';
 import 'package:flutter/foundation.dart';
+import '../utils/date_formatter.dart';
 
 class ItemManagementService {
   final StorageService _storageService = StorageService();
+
+  DateTime _timestampForSelectedDate(DateTime selectedDate) {
+    final now = DateTime.now();
+    return DateTime(
+      selectedDate.year,
+      selectedDate.month,
+      selectedDate.day,
+      now.hour,
+      now.minute,
+      now.second,
+      now.millisecond,
+      now.microsecond,
+    );
+  }
+
+  String _toUiTimestamp(DateTime timestamp) {
+    final hour = timestamp.hour > 12
+        ? timestamp.hour - 12
+        : timestamp.hour == 0
+            ? 12
+            : timestamp.hour;
+    final minute = timestamp.minute.toString().padLeft(2, '0');
+    final ampm = timestamp.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $ampm';
+  }
+
+  DateTime? _parseScheduledDate(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) return DateFormatter.startOfDay(value);
+
+    final asString = value.toString().trim();
+    if (asString.isEmpty) return null;
+
+    final parsed = DateTime.tryParse(asString);
+    if (parsed == null) {
+      debugPrint('⚠️ Invalid scheduledDate from AI: $value');
+      return null;
+    }
+    return DateFormatter.startOfDay(parsed);
+  }
+
+  String? _normalizeScheduledTime(dynamic value) {
+    final normalized = DateFormatter.normalizeScheduledTime(value);
+    if (value != null &&
+        value.toString().trim().isNotEmpty &&
+        normalized == null) {
+      debugPrint('⚠️ Invalid scheduledTime from AI: $value');
+    }
+    return normalized;
+  }
 
   // Update an item (note or task) in both storage and UI
   Future<void> updateItem({
@@ -15,11 +66,23 @@ class ItemManagementService {
     required bool newCompleted,
     required ItemType originalItemType,
     required String storageId,
+    DateTime? newScheduledDate,
+    String? newScheduledTime,
+    bool applyScheduleUpdates = false,
     required DateTime selectedDate,
     required Map<String, List<TimelineEntry>> timelineEntriesByDate,
     required Function() onStateUpdate,
   }) async {
     final existingEntry = await _storageService.getEntryById(storageId);
+
+    final scheduledDateForTask = applyScheduleUpdates
+        ? (newScheduledDate == null
+            ? null
+            : DateFormatter.startOfDay(newScheduledDate))
+        : existingEntry?.scheduledDate;
+    final scheduledTimeForTask = applyScheduleUpdates
+        ? _normalizeScheduledTime(newScheduledTime)
+        : existingEntry?.scheduledTime;
 
     final updatedEntry = models.TimelineEntry(
       id: storageId,
@@ -29,6 +92,8 @@ class ItemManagementService {
           ? models.EntryType.note
           : models.EntryType.task,
       completed: newCompleted,
+      scheduledDate: newItemType == ItemType.task ? scheduledDateForTask : null,
+      scheduledTime: newItemType == ItemType.task ? scheduledTimeForTask : null,
     );
     await _storageService.updateEntry(updatedEntry);
 
@@ -43,6 +108,8 @@ class ItemManagementService {
         uiEntry.tasks[itemRef.index] = TaskItem(
           task: newContent,
           completed: newCompleted,
+          scheduledDate: scheduledDateForTask,
+          scheduledTime: scheduledTimeForTask,
         );
       } else if (itemRef.type == ItemType.note &&
           itemRef.index < uiEntry.notes.length) {
@@ -65,16 +132,9 @@ class ItemManagementService {
     debugPrint('   Note text: "$noteText"');
     debugPrint('   Selected date: $selectedDate');
 
-    final now = DateTime.now();
-    final hour = now.hour > 12
-        ? now.hour - 12
-        : now.hour == 0
-            ? 12
-            : now.hour;
-    final minute = now.minute.toString().padLeft(2, '0');
-    final ampm = now.hour >= 12 ? 'PM' : 'AM';
-    final timestamp = '$hour:$minute $ampm';
-    final isDaytime = now.hour >= 6 && now.hour < 18;
+    final entryTimestamp = _timestampForSelectedDate(selectedDate);
+    final timestamp = _toUiTimestamp(entryTimestamp);
+    final isDaytime = DateFormatter.isTimestamp24HourDaytime(entryTimestamp);
 
     debugPrint('   Timestamp: $timestamp');
 
@@ -82,7 +142,7 @@ class ItemManagementService {
     final storageEntry = models.TimelineEntry(
       id: _storageService.generateId(),
       content: noteText,
-      timestamp: now,
+      timestamp: entryTimestamp,
       type: models.EntryType.note,
       completed: false,
     );
@@ -150,21 +210,16 @@ class ItemManagementService {
     required DateTime selectedDate,
     required Map<String, List<TimelineEntry>> timelineEntriesByDate,
     required Function() onStateUpdate,
+    DateTime? scheduledDate,
+    String? scheduledTime,
   }) async {
     debugPrint('✅ ItemManagementService: Creating task entry...');
     debugPrint('   Task text: "$taskText"');
     debugPrint('   Selected date: $selectedDate');
 
-    final now = DateTime.now();
-    final hour = now.hour > 12
-        ? now.hour - 12
-        : now.hour == 0
-            ? 12
-            : now.hour;
-    final minute = now.minute.toString().padLeft(2, '0');
-    final ampm = now.hour >= 12 ? 'PM' : 'AM';
-    final timestamp = '$hour:$minute $ampm';
-    final isDaytime = now.hour >= 6 && now.hour < 18;
+    final entryTimestamp = _timestampForSelectedDate(selectedDate);
+    final timestamp = _toUiTimestamp(entryTimestamp);
+    final isDaytime = DateFormatter.isTimestamp24HourDaytime(entryTimestamp);
 
     debugPrint('   Timestamp: $timestamp');
 
@@ -172,9 +227,13 @@ class ItemManagementService {
     final storageEntry = models.TimelineEntry(
       id: _storageService.generateId(),
       content: taskText,
-      timestamp: now,
+      timestamp: entryTimestamp,
       type: models.EntryType.task,
       completed: false,
+      scheduledDate: scheduledDate == null
+          ? null
+          : DateFormatter.startOfDay(scheduledDate),
+      scheduledTime: _normalizeScheduledTime(scheduledTime),
     );
 
     debugPrint('   Storage entry ID: ${storageEntry.id}');
@@ -198,6 +257,8 @@ class ItemManagementService {
       existingUiEntry.tasks.add(TaskItem(
         task: taskText,
         completed: false,
+        scheduledDate: storageEntry.scheduledDate,
+        scheduledTime: storageEntry.scheduledTime,
       ));
       existingUiEntry.itemOrder.add(TimelineItemRef(
           type: ItemType.task,
@@ -216,6 +277,8 @@ class ItemManagementService {
           TaskItem(
             task: taskText,
             completed: false,
+            scheduledDate: storageEntry.scheduledDate,
+            scheduledTime: storageEntry.scheduledTime,
           )
         ],
         itemOrder: [
@@ -307,23 +370,16 @@ class ItemManagementService {
   // Create multiple items from processed audio (notes and tasks)
   Future<void> createItemsFromProcessedAudio({
     required List<String> notes,
-    required List<TaskItem> tasks,
+    required List<Map<String, dynamic>> tasks,
     required DateTime selectedDate,
     required Map<String, List<TimelineEntry>> timelineEntriesByDate,
     required Function() onStateUpdate,
   }) async {
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = DateFormatter.startOfDay(now);
 
     // Format timestamp for UI display
-    final hour = now.hour > 12
-        ? now.hour - 12
-        : now.hour == 0
-            ? 12
-            : now.hour;
-    final minute = now.minute.toString().padLeft(2, '0');
-    final ampm = now.hour >= 12 ? 'PM' : 'AM';
-    final timestamp = '$hour:$minute $ampm';
+    final timestamp = _toUiTimestamp(now);
     final isDaytime = now.hour >= 6 && now.hour < 18;
 
     // Save each note and task to storage
@@ -340,15 +396,33 @@ class ItemManagementService {
     }
 
     final savedTaskEntries = <models.TimelineEntry>[];
-    for (final task in tasks) {
+    final uiTasks = <TaskItem>[];
+    for (final taskData in tasks) {
+      final taskText = (taskData['text'] ?? '').toString().trim();
+      if (taskText.isEmpty) {
+        continue;
+      }
+
+      final scheduledDate = _parseScheduledDate(taskData['scheduledDate']);
+      final scheduledTime = _normalizeScheduledTime(taskData['scheduledTime']);
+
       final storageEntry = models.TimelineEntry(
         id: _storageService.generateId(),
-        content: task.task,
+        content: taskText,
         timestamp: now,
         type: models.EntryType.task,
-        completed: task.completed,
+        completed: false,
+        scheduledDate: scheduledDate,
+        scheduledTime: scheduledTime,
       );
       savedTaskEntries.add(storageEntry);
+
+      uiTasks.add(TaskItem(
+        task: taskText,
+        completed: false,
+        scheduledDate: scheduledDate,
+        scheduledTime: scheduledTime,
+      ));
     }
 
     for (final entry in savedNoteEntries) {
@@ -359,9 +433,7 @@ class ItemManagementService {
     }
 
     // Update UI if we're viewing today
-    if (selectedDate.year == today.year &&
-        selectedDate.month == today.month &&
-        selectedDate.day == today.day) {
+    if (DateFormatter.isSameDay(selectedDate, today)) {
       final existingUiEntry = timelineEntriesByDate[timestamp]?.first;
 
       if (existingUiEntry != null) {
@@ -377,8 +449,8 @@ class ItemManagementService {
           ));
         }
 
-        for (int i = 0; i < tasks.length; i++) {
-          final task = tasks[i];
+        for (int i = 0; i < uiTasks.length; i++) {
+          final task = uiTasks[i];
           final newTaskIndex = existingUiEntry.tasks.length;
           existingUiEntry.tasks.add(task);
           existingUiEntry.itemOrder.add(TimelineItemRef(
@@ -399,7 +471,7 @@ class ItemManagementService {
           ));
         }
 
-        for (int i = 0; i < tasks.length; i++) {
+        for (int i = 0; i < uiTasks.length; i++) {
           itemOrder.add(TimelineItemRef(
             type: ItemType.task,
             index: i,
@@ -411,7 +483,7 @@ class ItemManagementService {
           timestamp: timestamp,
           isDaytime: isDaytime,
           notes: notes,
-          tasks: tasks,
+          tasks: uiTasks,
           itemOrder: itemOrder,
         );
         timelineEntriesByDate[timestamp] = [newUiEntry];
