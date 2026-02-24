@@ -5,7 +5,7 @@ import '../config.dart';
 
 class AIAnalysisService {
   final String baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
-  static const String model = 'nvidia/nemotron-nano-12b-v2-vl:free';
+  static const String model = 'nvidia/nemotron-3-nano-30b-a3b:free';
 
   Future<Map<String, dynamic>> analyzeTranscription(
       String transcription) async {
